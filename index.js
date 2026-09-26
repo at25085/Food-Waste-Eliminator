@@ -18,6 +18,10 @@ app.get('/upload', (req, res) => {
   res.render("upload.ejs");
 });
 
+app.get('/about', (req, res) => {
+  res.render("about.ejs");
+});
+
 app.listen(3000, () => {
   console.log('Server is running on http://localhost:3000');
 });

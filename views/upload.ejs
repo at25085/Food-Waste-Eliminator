@@ -11,13 +11,14 @@
 </head>
 <body class="bg-gray-100 text-gray-800 font-sans">
 
-    <!-- Top Header -->
     <header class="bg-white shadow-md p-4 flex justify-between items-center slide-up" style="animation-delay: 0.1s;">
-        <h1 class="text-2xl font-bold text-green-600">Food Waster</h1>
+        <a href="/" class="inline-block cursor-pointer hover:opacity-80 transition">
+            <h1 class="text-2xl font-bold text-green-600">Food Waster</h1>
+        </a>
         <nav class="space-x-6 font-semibold">
             <a href="/" class="text-gray-500 hover:text-green-600 transition">Dashboard</a>
-            <!-- Upload is active here -->
             <a href="/upload" class="text-green-600 border-b-2 border-green-600 pb-1">Upload</a>
+            <a href="/about" class="text-gray-500 hover:text-green-600 transition">About</a>
         </nav>
     </header>
 
@@ -55,7 +56,8 @@
         <!-- Recent Uploads Dummy List -->
         <div class="bg-white p-6 rounded-xl shadow-sm slide-up" style="animation-delay: 0.4s;">
             <h3 class="text-lg font-bold mb-4 text-gray-700 border-b pb-2">Recent Uploads</h3>
-            <ul class="space-y-3">
+            <!-- Added ID to the ul list so we can target it in Javascript -->
+            <ul id="recent-uploads-list" class="space-y-3">
                 <li class="flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-100">
                     <div class="flex items-center space-x-3">
                         <svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
@@ -72,6 +74,7 @@
         const dropZone = document.getElementById('drop-zone');
         const fileInput = document.getElementById('file-input');
         const fileFeedback = document.getElementById('file-feedback');
+        const recentUploadsList = document.getElementById('recent-uploads-list');
 
         // Trigger file input when clicking the drop zone
         dropZone.addEventListener('click', () => fileInput.click());
@@ -108,12 +111,35 @@
         // Function to show UI feedback once files are selected/dropped
         function handleFiles(files) {
             if (files.length > 0) {
-                // Get just the names of the files
+                // 1. Get the names of the files
                 const fileNames = Array.from(files).map(file => file.name).join(', ');
-                fileFeedback.innerHTML = `Ready to upload: <strong>${fileNames}</strong>`;
+                
+                // 2. Show success message
+                fileFeedback.innerHTML = `Successfully uploaded: <strong>${fileNames}</strong>. Redirecting to dashboard...`;
                 fileFeedback.classList.remove('hidden');
                 
-                // Note: In a real app, you would use fetch() or FormData here to send 'files' to your Express server!
+                // 3. Format the current time (e.g., "9:00 AM")
+                const now = new Date();
+                const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                
+                // 4. Create a new list item and style it slightly differently (light green background) to show it's new
+                const newListItem = document.createElement('li');
+                newListItem.className = "flex justify-between items-center p-3 bg-green-50 rounded-lg border border-green-200 slide-up";
+                newListItem.innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        <span class="font-medium text-gray-700">${fileNames}</span>
+                    </div>
+                    <span class="text-sm text-gray-500">Today at ${timeString}</span>
+                `;
+                
+                // 5. Add the new item to the top of the "Recent Uploads" list
+                recentUploadsList.insertBefore(newListItem, recentUploadsList.firstChild);
+                
+                // 6. Redirect to the dashboard page after 2 seconds (2000 milliseconds)
+                setTimeout(() => {
+                    window.location.href = '/?uploaded=true';
+                }, 4000);
             }
         }
     </script>

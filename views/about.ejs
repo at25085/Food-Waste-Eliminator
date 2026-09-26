@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About Us - Food Waster</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/styles/main.css" />
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans">
+
+    <header class="bg-white shadow-md p-4 flex justify-between items-center slide-up" style="animation-delay: 0.1s;">
+        <a href="/" class="inline-block cursor-pointer hover:opacity-80 transition">
+            <h1 class="text-2xl font-bold text-green-600">Food Waster</h1>
+        </a>
+        <nav class="space-x-6 font-semibold">
+            <a href="/" class="text-gray-500 hover:text-green-600 transition">Dashboard</a>
+            <a href="/upload" class="text-gray-500 hover:text-green-600 transition">Upload</a>
+            <a href="/about" class="text-green-600 border-b-2 border-green-600 pb-1">About</a>
+        </nav>
+    </header>
+
+    <main class="p-8 max-w-5xl mx-auto space-y-8">
+        
+        <!-- Page Title -->
+        <div class="bg-white p-6 rounded-xl shadow-sm slide-up" style="animation-delay: 0.2s;">
+            <h2 class="text-3xl font-bold text-gray-800">About Food Waster</h2>
+            <p class="text-gray-500 mt-2 text-lg">Intelligent forecasting for a sustainable future.</p>
+        </div>
+
+        <!-- Mission Statement -->
+        <div class="bg-green-600 text-white p-10 rounded-xl shadow-md text-center slide-up" style="animation-delay: 0.3s;">
+            <h3 class="text-2xl font-bold mb-4 uppercase tracking-wider text-green-100">Our Mission</h3>
+            <p class="text-xl font-medium leading-relaxed max-w-3xl mx-auto">
+                To empower grocery retailers with intelligent, data-driven tools that maximize profitability while completely eradicating preventable food waste.
+            </p>
+        </div>
+
+        <!-- The Problem & Our Solution Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 slide-up" style="animation-delay: 0.4s;">
+            
+            <!-- Problem Card -->
+            <div class="bg-white p-8 rounded-xl shadow-sm border-t-4 border-red-500 flex flex-col h-full">
+                <div class="flex items-center mb-4">
+                    <svg class="w-8 h-8 text-red-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                    <h3 class="text-2xl font-bold text-gray-800">The Problem</h3>
+                </div>
+                <p class="text-gray-600 leading-relaxed">
+                    Grocery stores throw away billions of pounds of food every single year due to over-ordering and inaccurate demand forecasting. This outdated guesswork not only creates massive financial losses for businesses but also contributes heavily to global greenhouse gas emissions and environmental degradation.
+                </p>
+            </div>
+
+            <!-- Solution Card -->
+            <div class="bg-white p-8 rounded-xl shadow-sm border-t-4 border-blue-500 flex flex-col h-full">
+                <div class="flex items-center mb-4">
+                    <svg class="w-8 h-8 text-blue-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+                    <h3 class="text-2xl font-bold text-gray-800">Our Solution</h3>
+                </div>
+                <p class="text-gray-600 leading-relaxed">
+                    We replace intuition with precision. By utilizing cutting-edge predictive analytics, we forecast your exact inventory needs based on historical sales data, local events, and seasonal trends. Our platform tells you exactly what to order and when, minimizing your waste and maximizing your bottom line.
+                </p>
+            </div>
+        </div>
+
+        <!-- How It Works Section -->
+        <div class="bg-white p-10 rounded-xl shadow-sm slide-up" style="animation-delay: 0.5s;">
+            <h3 class="text-2xl font-bold text-gray-800 mb-8 text-center border-b pb-4">How It Works</h3>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <!-- Step 1 -->
+                <div class="text-center group">
+                    <div class="w-20 h-20 bg-gray-50 border-2 border-gray-100 group-hover:border-blue-500 group-hover:text-blue-600 transition-colors text-gray-400 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl font-bold shadow-sm">
+                        1
+                    </div>
+                    <h4 class="text-lg font-bold text-gray-800">Upload Data</h4>
+                    <p class="text-sm text-gray-500 mt-2 leading-relaxed">
+                        Securely upload your store's daily sales history and inventory spreadsheets using our intuitive drag-and-drop interface.
+                    </p>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="text-center group">
+                    <div class="w-20 h-20 bg-gray-50 border-2 border-gray-100 group-hover:border-purple-500 group-hover:text-purple-600 transition-colors text-gray-400 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl font-bold shadow-sm">
+                        2
+                    </div>
+                    <h4 class="text-lg font-bold text-gray-800">AI Analysis</h4>
+                    <p class="text-sm text-gray-500 mt-2 leading-relaxed">
+                        Our robust machine learning models process your data alongside external factors like upcoming holidays and community events.
+                    </p>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="text-center group">
+                    <div class="w-20 h-20 bg-gray-50 border-2 border-gray-100 group-hover:border-green-500 group-hover:text-green-600 transition-colors text-gray-400 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl font-bold shadow-sm">
+                        3
+                    </div>
+                    <h4 class="text-lg font-bold text-gray-800">Personalized Report</h4>
+                    <p class="text-sm text-gray-500 mt-2 leading-relaxed">
+                        Instantly receive a perfectly optimized purchasing order report. Download it as a CSV and integrate it directly into your supply chain.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tech Stack Section -->
+        <div class="bg-white p-8 rounded-xl shadow-sm slide-up" style="animation-delay: 0.6s;">
+            <h3 class="text-xl font-bold text-gray-800 mb-5">Built With Modern Technology</h3>
+            <div class="flex flex-wrap gap-3">
+                <span class="px-5 py-2.5 bg-gray-50 border border-gray-200 text-gray-700 rounded-lg font-medium text-sm flex items-center shadow-sm">
+                    Node.js
+                </span>
+                <span class="px-5 py-2.5 bg-gray-50 border border-gray-200 text-gray-700 rounded-lg font-medium text-sm flex items-center shadow-sm">
+                    Express.js
+                </span>
+                <span class="px-5 py-2.5 bg-gray-50 border border-gray-200 text-gray-700 rounded-lg font-medium text-sm flex items-center shadow-sm">
+                    Tailwind CSS
+                </span>
+                <span class="px-5 py-2.5 bg-gray-50 border border-gray-200 text-gray-700 rounded-lg font-medium text-sm flex items-center shadow-sm">
+                    Chart.js
+                </span>
+                <span class="px-5 py-2.5 bg-gray-50 border border-gray-200 text-gray-700 rounded-lg font-medium text-sm flex items-center shadow-sm">
+                    Machine Learning Models
+                </span>
+            </div>
+        </div>
+
+    </main>
+
+</body>
+</html>
