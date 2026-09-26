@@ -443,7 +443,7 @@ def status(engine, store_id: str) -> dict:
     return {
         "store_id": store_id, "serving_version": version, "serving_context": ctx,
         "serving_is_store_specific": False,
-        "has_learned_from_this_store": pd.Timestamp(meta["training_end"]) >= (days.min() if len(days) else pd.Timestamp.max),
+        "has_learned_from_this_store": store_id in (meta.get("trained_with_uploads_from") or []),
         "uploaded_days": int(len(days)), "first_day": str(days.min().date()) if len(days) else None,
         "last_day": str(days.max().date()) if len(days) else None,
         "new_days_since_model_training": new_days, "retrain_threshold_days": settings.min_new_days_for_retrain,
@@ -455,6 +455,11 @@ def status(engine, store_id: str) -> dict:
         "explanation": ("Retraining needs the new days to be split: the challenger learns from the older "
                         f"ones and is judged on the most recent {EVAL_DAYS} it never saw."),
     }
+
+
+def uploading_stores(engine) -> list[str]:
+    with engine.connect() as conn:
+        return sorted({r[0] for r in conn.execute(select(S.observations.c.store_id).distinct())})
 
 
 EXISTING_MAX_GLOBAL_DEGRADATION = 0.01  # the existing stores may not get more than 1% worse
@@ -475,14 +480,21 @@ def retrain_store(engine, store_id: str, log=print) -> dict:
     champ = load_candidate(champ_version)
     if champ.meta.get("feature_schema_version") != FEATURE_SCHEMA_VERSION:
         raise RuntimeError(f"serving model uses schema {champ.meta.get('feature_schema_version')}, code is {FEATURE_SCHEMA_VERSION}")
-    sf = store_features(engine, store_id, with_next_day=False)
+    # One global model: every store with uploaded sheets is part of the training data, not just
+    # the store that triggered this retrain (otherwise store A's data would vanish when store B retrains).
+    uploaders = uploading_stores(engine)
+    frames = {sid: store_features(engine, sid, with_next_day=False) for sid in uploaders}
+    sf = frames[store_id]
     last = sf.loc[sf["sales"].notna(), "date"].max()
     cutoff = last - pd.Timedelta(days=EVAL_DAYS)
     glob = pd.read_parquet(processed_dir() / "features_h1.parquet")
-    for c in ("store_id", "category", "category_l2", "product_id"):
-        glob[c] = glob[c].astype(str)
-        sf[c] = sf[c].astype(str)
-    rows = demand.training_rows(pd.concat([glob, sf[glob.columns.intersection(sf.columns)]], ignore_index=True))
+    parts = [glob]
+    for f in frames.values():
+        parts.append(f[glob.columns.intersection(f.columns)])
+    for part in parts:
+        for c in ("store_id", "category", "category_l2", "product_id"):
+            part[c] = part[c].astype(str)
+    rows = demand.training_rows(pd.concat(parts, ignore_index=True))
     for c in ("store_id", "category", "category_l2", "product_id"):
         rows[c] = rows[c].astype("category")
     log(f"training a challenger of the global model: all stores + {store_id}'s uploads through {cutoff.date()}")
@@ -515,7 +527,8 @@ def retrain_store(engine, store_id: str, log=print) -> dict:
             reason += f"; existing stores {change:+.1%} (worst category {worst:+.1%})"
 
     version = registry.next_version()
-    registry.save(version, cand.booster, {**cand.meta, "context": "production", "trained_with_uploads_from": store_id,
+    registry.save(version, cand.booster, {**cand.meta, "context": "production", "trained_with_uploads_from": uploaders,
+                                          "retrain_triggered_by": store_id,
                                           "train_metrics": cand.train_metrics,
                                           "eval_window": [str((cutoff + pd.Timedelta(days=1)).date()), str(last.date())],
                                           "decision": decision, "reason": reason}, lifecycle.extra_models(cand))

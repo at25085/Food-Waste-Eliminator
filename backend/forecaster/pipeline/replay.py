@@ -12,6 +12,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 
+import numpy as np
 import pandas as pd
 from sqlalchemy import delete, insert, select
 
@@ -112,7 +113,8 @@ def _write_ledger(engine, context, day_rows, p50, p80, version, day) -> None:
                           product_id=str(r["product_id"]), category=str(r["category"]),
                           prediction_created_at=created, forecast_date=day.date(), horizon=1,
                           predicted_units=float(a), p80_units=float(b), weather_forecast=weather,
-                          expected_customers=None if pd.isna(r["expected_customer_count"]) else float(r["expected_customer_count"]),
+                          expected_customers=(None if pd.isna(r.get("expected_customer_count", np.nan))
+                                              else float(r["expected_customer_count"])),
                           model_version=version, feature_schema_version=FEATURE_SCHEMA_VERSION))
         outs.append(dict(prediction_id=pid, actual_units_sold=float(r["sales"]),
                          actual_customer_count=None if pd.isna(r.get("customer_count")) else float(r["customer_count"]),
