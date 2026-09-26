@@ -25,13 +25,15 @@ All numbers are generated files, not hand-typed:
 
 | Measure | Value |
 |---|---|
-| Replay WAPE, 2024-01-20 → 2024-06-02 (with weekly governed retraining) | **14.3%** vs 24.2% same-weekday-last-week (~41% less error) |
-| Production holdout WAPE, 2024-05-06 → 2024-06-02 | 14.3% vs 22.5% last-week, 21.8% 28-day mean; bias −3.1%; P80 coverage 80% |
-| Simulated waste vs naive ordering (same rule, ~5% lost-sales service level) | ≈87% less waste **and** ≈26% fewer lost sales |
+| Replay WAPE, 2024-01-20 → 2024-06-02 (with weekly governed retraining) | **14.4%** vs 24.2% same-weekday-last-week (~41% less error) |
+| Production holdout WAPE, 2024-05-06 → 2024-06-02 | **14.2%** vs 22.5% last-week, 21.8% 28-day mean (37% less error); bias −3.9%; P80 coverage 79% |
+| Simulated waste vs naive ordering (same rule, ~5% lost-sales service level) | ≈87% less waste **and** ≈22% fewer lost sales |
+| Store learning (sample store, one global model) | 25.3% → 11.3% error on the store's unseen fortnight; existing stores 4.5% better |
 | Replay governance | 10 challengers: 6 promoted, 4 rejected |
 | Measured & rejected | stockout censoring, produce specialist, per-store calibration, spike weights; weather gives no gain at D+1 |
 
 WAPE = Σ|pred − actual| / Σ actual. If "accuracy" is quoted it means 1 − WAPE (≈86% by volume).
+Struggles and what we learned: [docs/LESSONS.md](docs/LESSONS.md).
 
 ## Run it
 

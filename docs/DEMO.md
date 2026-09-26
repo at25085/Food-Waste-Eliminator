@@ -38,8 +38,8 @@ CO2e and meals — with the cited factors and the labeled unit-weight assumption
 "And it doesn't cut waste by ordering less: it also has fewer empty shelves."
 
 ## 1:55 — Honesty & numbers (25 s)
-- Model Health: **14.3% weighted error vs 24.2% for same-weekday-last-week** (about 41% less error),
-  P80 coverage 80%. Weather didn't help this online grocer one day ahead — we measured it and say so.
+- Model Health: **14.2% weighted error vs 22.5% for same-weekday-last-week** on the 4-week holdout
+  (37% less error), P80 coverage 79%. Weather didn't help this online grocer one day ahead — we measured it and say so.
 - "Waste is simulated — no public dataset records it — and it's labeled everywhere."
 - Rollback: any previously promoted version can be restored; nothing is ever overwritten.
 

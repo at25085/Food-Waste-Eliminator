@@ -32,15 +32,18 @@ people instead of the bin.
   changing forecast numbers.
 
 ## Results (all on data the model never trained on)
-- **Forecast error 14.3% (WAPE)** over a Jan–Jun 2024 replay vs **24.2%** for "same weekday last
+- **Forecast error 14.4% (WAPE)** over a Jan–Jun 2024 replay vs **24.2%** for "same weekday last
   week" — about 41% less error.
 - **Simulated waste vs. naive ordering at a realistic service level (≈5% lost sales):** ≈87% less
-  waste *and* ≈26% fewer lost sales — waste isn't cut by simply ordering less. (FIFO shelf-life
+  waste *and* ≈22% fewer lost sales — waste isn't cut by simply ordering less. (FIFO shelf-life
   simulator; no public dataset records waste. See the Impact screen for kg, CO2e and meals, with
   cited factors and labeled assumptions.)
 - Replay: 10 challengers trained, 6 promoted, 4 rejected by the promotion rules.
 - Holiday-proximity features cut pre-Easter error from 22.0% to 18.3%; seven discount types cut
-  replay error 14.7% → 14.3%.
+  replay error 14.7% → 14.3%; dropping the traffic-forecast model made it simpler at the same accuracy.
+- **Learning from a store's own sheets:** the sample store went from 25.3% to 11.3% error on a
+  fortnight neither model had seen, and the existing stores got 4.5% better (partly fresher data;
+  the sample copies a warehouse the model knew).
 - Measured and **rejected**: dropping stockout days as targets, a produce specialist model,
   per-store calibration, spike weighting. Weather didn't help this online grocer one day ahead.
 
@@ -63,12 +66,23 @@ people instead of the bin.
 - ≈0.55 kg (1.22 lb) of food per meal — derived from ReFED (29% of 240 M tons ≈ 114 B meals).
 - Unit weights per category are **assumptions** (Rohlik records pieces or kg by product).
 
-## Challenges
-- Our first replay rejected every challenger: early stopping held out the newest seven weeks, so
-  new data was never learned from. Refitting on the full snapshot fixed it.
-- Easter: a 0/1 holiday flag can't say "Easter is in two days"; proximity features could.
-- Our first waste numbers were flattering because the default ran the store at 13% stockouts; we
-  moved to a realistic service level and report waste and lost sales together.
+## Challenges we ran into
+(Full log with numbers: docs/LESSONS.md.)
+- **Every challenger was rejected in our first replay.** Early stopping held out the newest seven
+  weeks, so new data was never learned from. Refitting on the full snapshot fixed it: 6 of 10
+  challengers promoted.
+- **Easter broke the model.** A 0/1 holiday flag can't say "Easter is in two days"; pre-holiday
+  error hit 25%. Holiday-proximity features cut pre-Easter error from 22.0% to 18.3%.
+- **Our first waste numbers were flattering.** The default ran the store at 13% stockouts. We moved
+  to a realistic service level and now report waste and lost sales together.
+- **The cheapest-looking markdown wasn't the cheapest.** A discount also applies to units that would
+  have sold anyway, so markdowns are now chosen by money, using the trained model's predicted sales
+  at each discount — sometimes the answer is "donate, don't discount".
+- **Most accuracy ideas failed.** Stockout censoring, a produce specialist, per-store calibration,
+  spike weighting and a single multi-quantile model were all measured and rejected; weather didn't
+  help this online grocer. Dropping a whole model (the traffic forecast) made it better.
+- **One global model, not one per store.** A store's uploads retrain it, and it's promoted only if
+  it's better for that store and no worse for the others.
 
 ## What's next
 Connect a real store's POS and door counter, real food-recovery partners, and replace the markdown
