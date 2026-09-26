@@ -1,0 +1,27 @@
+{
+  "name": "food-forecasting",
+  "version": "1.0.0",
+  "description": "",
+  "homepage": "https://github.com/at25085/Food-Forecasting#readme",
+  "bugs": {
+    "url": "https://github.com/at25085/Food-Forecasting/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/at25085/Food-Forecasting.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "body-parser": "^2.3.0",
+    "dotenv": "^18.0.4",
+    "ejs": "^6.0.1",
+    "express": "^5.2.1"
+  },
+  "keywords": []
+}

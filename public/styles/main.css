@@ -1,0 +1,23 @@
+body {
+  font-family: sans-serif;
+}
+
+.main-header {
+  background-color: #333;      
+  color: white;              
+  padding: 15px 30px;         
+  display: flex;              
+  justify-content: space-between; 
+  align-items: center;          
+}
+
+.nav-links a {
+  color: white;
+  text-decoration: none;      
+  margin-left: 20px;       
+  transition: color 0.3s;
+}
+
+.nav-links a:hover {
+  color: #1abc9c;             
+}
