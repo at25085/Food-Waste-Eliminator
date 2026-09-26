@@ -1,0 +1,29 @@
+# Production on one server (e.g. Vultr): the app + Caddy for HTTPS.
+#   DOMAIN=yourname.tech in backend/.env → Caddy fetches a certificate automatically.
+# Models, plans and training data live on the host (./artifacts, ./data), so uploads and
+# retrains made in the demo survive restarts. The database is Tiger Cloud (DATABASE_URL).
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: backend/.env
+    volumes:
+      - ./artifacts:/app/artifacts
+      - ./data/processed:/app/data/processed
+      - ./data/cache:/app/data/cache
+    expose:
+      - "8000"
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    env_file: backend/.env
+    ports:
+      - "80:80"
+      - "443:443"
+    command: caddy reverse-proxy --from ${DOMAIN:-:80} --to app:8000
+    volumes:
+      - caddy_data:/data
+    depends_on:
+      - app
+volumes:
+  caddy_data:
