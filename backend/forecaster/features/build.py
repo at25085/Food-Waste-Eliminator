@@ -13,7 +13,7 @@ import pandas as pd
 from forecaster.features.calendar import HOLIDAY_FEATURES, calendar_frame, holiday_features
 from forecaster.weather.open_meteo import WEATHER_FEATURES, weather_code_group
 
-FEATURE_SCHEMA_VERSION = "fs_v5"  # v5: seven discount types + 7-day-lagged discount
+FEATURE_SCHEMA_VERSION = "fs_v6"  # v6: stage-1 traffic forecast dropped from inputs (measured)
 
 CATEGORICAL = ["store_id", "category", "category_l2", "product_id"]
 CALENDAR = ["dow", "month", "day_of_year", "week_of_year", "is_weekend", "holiday",
@@ -22,10 +22,13 @@ DISCOUNT_TYPES = [f"type_{i}_discount" for i in range(7)]
 PRICE = ["sell_price_main", "price_rel_28d", "discount_max", "any_discount", "n_discount_types",
          *DISCOUNT_TYPES, "discount_max_lag_7"]
 WEATHER = [*WEATHER_FEATURES, "weather_code_group", "temp_anomaly_28d"]
+from forecaster.config import settings as _settings  # noqa: E402
+
 TRAFFIC = ["customer_count_lag_h", "customer_count_lag_7", "customer_count_lag_14",
            "customer_count_rolling_7_mean", "customer_count_rolling_28_mean",
            "same_weekday_customer_mean", "units_per_100_customers_28d",
-           "category_units_per_100_customers_28d", "expected_customer_count"]
+           "category_units_per_100_customers_28d",
+           *(["expected_customer_count"] if _settings.use_traffic_forecast else [])]
 _DEMAND_LAGS = (1, 2, 3, 7, 14, 28)
 
 
@@ -52,11 +55,14 @@ def complete_daily_index(panel: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True)
 
 
-def add_holiday_features(df: pd.DataFrame) -> pd.DataFrame:
+LOCATIONS: dict[str, dict] | None = None  # set by callers that serve runtime-registered stores
+
+
+def add_holiday_features(df: pd.DataFrame, locations: dict[str, dict] | None = None) -> pd.DataFrame:
     """Merge holiday proximity; future rows get their holiday flag from the public calendar."""
     flags = df.groupby(["store_id", "date"], as_index=False, observed=True)[["holiday", "shops_closed"]].max()
     flags["store_id"] = flags["store_id"].astype(str)
-    hf = holiday_features(calendar_frame(flags, df["date"].min(), df["date"].max()))
+    hf = holiday_features(calendar_frame(flags, df["date"].min(), df["date"].max(), locations or LOCATIONS))
     df = df.drop(columns=[c for c in HOLIDAY_FEATURES if c in df]).assign(store_id=df["store_id"].astype(str))
     df = df.merge(hf, on=["store_id", "date"], how="left")
     df["holiday"] = np.maximum(df["holiday"].fillna(0.0), df.pop("is_holiday").fillna(False).astype("float64"))

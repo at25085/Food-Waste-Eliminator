@@ -16,8 +16,6 @@ from dateutil.easter import easter
 
 from forecaster.config import STORE_LOCATIONS
 
-COUNTRY = {"Prague": ("CZ", None), "Brno": ("CZ", None), "Budapest": ("HU", None),
-           "Munich": ("DE", "BY"), "Frankfurt": ("DE", "HE")}
 HOLIDAY_FEATURES = ["days_to_next_holiday", "days_since_last_holiday", "next_holiday_type",
                     "last_holiday_type", "days_to_next_closure"]
 CAP = 21  # beyond three weeks, proximity carries no signal
@@ -35,19 +33,26 @@ def holiday_type(d: date) -> int:
     return _OTHER
 
 
-def store_holidays(store_id: str, years: range) -> set[date]:
-    country, subdiv = COUNTRY[STORE_LOCATIONS[store_id]["city"]]
-    return set(holidays.country_holidays(country, subdiv=subdiv, years=list(years)).keys())
+def store_holidays(loc: dict | None, years: range) -> set[date]:
+    """Public holidays for the store's country / state. Unknown location → no public calendar
+    (the dataset's own holiday flags still apply)."""
+    if not loc or not loc.get("country"):
+        return set()
+    return set(holidays.country_holidays(loc["country"], subdiv=loc.get("subdiv"), years=list(years)).keys())
 
 
-def calendar_frame(panel_flags: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+def calendar_frame(panel_flags: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp,
+                   locations: dict[str, dict] | None = None) -> pd.DataFrame:
     """store_id, date, is_holiday, is_closed for every store-day in [start, end].
-    panel_flags: store_id, date, holiday, shops_closed (dataset flags; may stop before `end`)."""
+    panel_flags: store_id, date, holiday, shops_closed (dataset flags; may stop before `end`).
+    locations: store_id → {country, subdiv, …}; defaults to the built-in stores."""
     years = range(start.year - 1, end.year + 2)
+    locations = locations or STORE_LOCATIONS
+    store_ids = sorted(set(panel_flags["store_id"].astype(str)) | (set(STORE_LOCATIONS) if panel_flags.empty else set()))
     frames = []
-    for store_id in STORE_LOCATIONS:
+    for store_id in store_ids:
         days = pd.DataFrame({"date": pd.date_range(start - pd.Timedelta(days=CAP + 1), end + pd.Timedelta(days=CAP + 1))})
-        public = store_holidays(store_id, years)
+        public = store_holidays(locations.get(store_id), years)
         flags = panel_flags[panel_flags["store_id"] == store_id][["date", "holiday", "shops_closed"]]
         days = days.merge(flags, on="date", how="left").fillna({"holiday": 0.0, "shops_closed": 0.0})
         days["is_holiday"] = (days["holiday"] > 0) | days["date"].dt.date.isin(public)

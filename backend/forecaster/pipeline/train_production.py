@@ -26,13 +26,14 @@ from forecaster.data import rohlik
 from forecaster.data.prepare import processed_dir
 from forecaster.db import schema as S
 from forecaster.db.schema import create_all, get_engine
-from forecaster.decisions.policy import compare_policies, critical_ratio, simulate_policy
+from forecaster.decisions.policy import compare_policies, simulate_policy
 from forecaster.features.build import FEATURE_SCHEMA_VERSION, WEATHER, build_features
 from forecaster.models import demand, registry
 from forecaster.models import traffic as stage1
 from forecaster.models.metrics import by_segment, summarize
 from forecaster.pipeline import lifecycle
 from forecaster.pipeline.dataset import store_calendar
+from forecaster.pipeline.store_learning import shelf_cohorts
 from forecaster.seed import excluded_days, seed_anomaly_days, seed_stores
 from forecaster.weather import open_meteo as om
 
@@ -63,6 +64,97 @@ def next_day_frame(panel: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
     return nxt
 
 
+def plan_existing_stores(engine, cand, version: str, log=print) -> pd.DataFrame:
+    """Tomorrow's plan for the built-in stores with the given model: forecasts, the discount
+    counterfactuals, simulated legacy stock, the plan file, and the ledger rows. Re-run whenever
+    a new global champion is promoted so every store is served by the same model."""
+    pdir = processed_dir()
+    feat = pd.read_parquet(pdir / "features_h1.parquet")
+    panel = pd.read_parquet(pdir / "panel.parquet")
+    weather = pd.read_parquet(pdir / "weather.parquet")
+    traffic = pd.read_parquet(pdir / "traffic.parquet")
+    s1 = pd.read_parquet(pdir / "stage1_h1.parquet")
+    rows = demand.training_rows(feat, excluded_days(engine))
+    end = rows["date"].max()
+    hold = rows[rows["date"] > end - pd.Timedelta(days=HOLDOUT_DAYS)].copy()
+    for k, v in demand.baseline_predictions(hold).items():
+        hold[k] = v
+    # Next-day recommendations as of the last data day.
+    as_of = end
+    tomorrow = as_of + pd.Timedelta(days=1)
+    wx = []
+    for store_id, loc in STORE_LOCATIONS.items():
+        w = om.previous_runs_d1(loc["lat"], loc["lon"], tomorrow.date(), tomorrow.date(), loc["tz"])
+        w["store_id"] = store_id
+        wx.append(w)
+    weather_next = pd.concat([weather, pd.concat(wx)], ignore_index=True).drop_duplicates(["store_id", "date"], keep="last")
+    recent = panel[panel["date"] > as_of - pd.Timedelta(days=70)]
+    ext = pd.concat([recent, next_day_frame(panel, as_of)], ignore_index=True)
+    # Stage-1 expected traffic for tomorrow from a model trained on everything up to as_of.
+    stores = sorted(panel["store_id"].unique())
+    cal_next = store_calendar(ext)
+    s1_next = stage1.store_day_frame(pd.concat([traffic, pd.DataFrame({"store_id": stores, "date": tomorrow, "customer_count": np.nan})]),
+                                     cal_next, weather_next, 1, stores)
+    exp_traffic = None
+    if settings.use_traffic_forecast:
+        s1_model = stage1.fit(s1_next, as_of)
+        s1_next = s1_next[s1_next["date"] == tomorrow].copy()
+        s1_next["expected_customer_count"] = stage1.predict(s1_model, s1_next)
+        exp_traffic = pd.concat([s1[["store_id", "date", "expected_customer_count"]],
+                                 s1_next[["store_id", "date", "expected_customer_count"]]])
+    nf = build_features(ext, weather_next, traffic, 1, expected_traffic=exp_traffic)
+    nf = nf[nf["date"] == tomorrow].copy()
+    nf["p50"] = cand.predict(nf)
+    nf["p80"] = cand.predict_p80(nf, nf["p50"].to_numpy())
+    # Model-estimated demand at each markdown depth the policy can suggest (counterfactual on the
+    # discount features, learned from Rohlik's real historical discount variation).
+    for d in MARKDOWN_LEVELS:
+        cf = nf.copy()
+        cf["discount_max"], cf["any_discount"], cf["n_discount_types"] = d, 1, 1
+        nf[f"p50_if_markdown_{int(d * 100)}"] = cand.predict(cf)
+
+    # Inventory entering tomorrow = what the store's LEGACY practice leaves on the shelf (the
+    # situation on install day): order same-weekday-last-week sales plus a 90% service-level
+    # buffer (z90 x trailing 7-day std), through the same FIFO shelf. Labeled in the UI.
+    z80 = 0.8416
+    inv_rows = []
+    for (st, pid), g in hold.sort_values("date").groupby(["store_id", "product_id"], observed=True):
+        life = settings.shelf_life_days.get(str(g["category"].iloc[0]), 3)
+        legacy50 = g["seasonal_naive_7"].fillna(g["sales_roll_28_mean"]).fillna(0).to_numpy()
+        legacy80 = legacy50 + z80 * g["sales_roll_7_std"].fillna(0).to_numpy()
+        _, shelf = simulate_policy(g["sales"].to_numpy(), legacy50, legacy80, LEGACY_SERVICE_LEVEL, life)
+        cohorts = shelf_cohorts(shelf)
+        inv_rows.append({"store_id": str(st), "product_id": str(pid), "on_hand": sum(u for u, _ in cohorts),
+                         "expiring_tomorrow": sum(u for u, d in cohorts if d == 1), "shelf_life": life,
+                         "cohorts": json.dumps(cohorts), "stock_source": "simulated legacy practice"})
+    inv = pd.DataFrame(inv_rows)
+    rec = nf[["store_id", "product_id", "name", "category", "sell_price_main", "p50", "p80", *[f"p50_if_markdown_{int(d * 100)}" for d in MARKDOWN_LEVELS],
+              "customer_count_rolling_7_mean", *om.WEATHER_FEATURES]].copy()
+    for c in ["store_id", "product_id", "category"]:
+        rec[c] = rec[c].astype(str)
+    rec = rec.merge(inv, on=["store_id", "product_id"], how="left").fillna({"on_hand": 0.0, "expiring_tomorrow": 0.0})
+    rec["forecast_date"] = str(tomorrow.date())
+    rec["as_of"] = str(as_of.date())
+    rec["model_version"] = version
+    rec.to_parquet(settings.artifacts_dir / "recommendations.parquet", index=False)
+
+    # Ledger: the predictions exist before their outcomes do.
+    created = _now()
+    preds = []
+    for _, r in rec.iterrows():
+        preds.append(dict(prediction_id=uuid.uuid4().hex, context="production", store_id=r["store_id"],
+                          product_id=r["product_id"], category=r["category"], prediction_created_at=created,
+                          forecast_date=tomorrow.date(), horizon=1, predicted_units=float(r["p50"]), p80_units=float(r["p80"]),
+                          weather_forecast={k: (None if pd.isna(r[k]) else float(r[k])) for k in om.WEATHER_FEATURES} | {"weather_source": "previous_runs_d1"},
+                          expected_customers=None,
+                          model_version=version, feature_schema_version=FEATURE_SCHEMA_VERSION))
+    with engine.begin() as conn:
+        conn.execute(insert(S.predictions), preds)
+
+    log(f"planned {len(rec)} products for {tomorrow.date()} with {version}")
+    return rec
+
+
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
     t0 = time.time()
@@ -73,10 +165,6 @@ def main() -> None:
         raise SystemExit(f"feature table was built with schema {features_schema()}, code expects "
                          f"{FEATURE_SCHEMA_VERSION}; run forecaster.pipeline.run_replay --force first")
     feat = pd.read_parquet(pdir / "features_h1.parquet")
-    panel = pd.read_parquet(pdir / "panel.parquet")
-    weather = pd.read_parquet(pdir / "weather.parquet")
-    traffic = pd.read_parquet(pdir / "traffic.parquet")
-    s1 = pd.read_parquet(pdir / "stage1_h1.parquet")
 
     engine = get_engine()
     create_all(engine)
@@ -135,72 +223,8 @@ def main() -> None:
     t = sim_summary["totals"]
     log(f"simulated waste: model {t['model_waste']:.0f} vs naive {t['baseline_waste']:.0f}; lost sales {t['model_lost']:.0f} vs {t['baseline_lost']:.0f}")
 
-    # Next-day recommendations as of the last data day.
-    as_of = end
-    tomorrow = as_of + pd.Timedelta(days=1)
-    wx = []
-    for store_id, loc in STORE_LOCATIONS.items():
-        w = om.previous_runs_d1(loc["lat"], loc["lon"], tomorrow.date(), tomorrow.date(), loc["tz"])
-        w["store_id"] = store_id
-        wx.append(w)
-    weather_next = pd.concat([weather, pd.concat(wx)], ignore_index=True).drop_duplicates(["store_id", "date"], keep="last")
-    recent = panel[panel["date"] > as_of - pd.Timedelta(days=70)]
-    ext = pd.concat([recent, next_day_frame(panel, as_of)], ignore_index=True)
-    # Stage-1 expected traffic for tomorrow from a model trained on everything up to as_of.
-    stores = sorted(panel["store_id"].unique())
-    cal_next = store_calendar(ext)
-    s1_next = stage1.store_day_frame(pd.concat([traffic, pd.DataFrame({"store_id": stores, "date": tomorrow, "customer_count": np.nan})]),
-                                     cal_next, weather_next, 1, stores)
-    s1_model = stage1.fit(s1_next, as_of)
-    s1_next = s1_next[s1_next["date"] == tomorrow].copy()
-    s1_next["expected_customer_count"] = stage1.predict(s1_model, s1_next)
-    exp_traffic = pd.concat([s1[["store_id", "date", "expected_customer_count"]], s1_next[["store_id", "date", "expected_customer_count"]]])
-    nf = build_features(ext, weather_next, traffic, 1, expected_traffic=exp_traffic)
-    nf = nf[nf["date"] == tomorrow].copy()
-    nf["p50"] = cand.predict(nf)
-    nf["p80"] = cand.predict_p80(nf, nf["p50"].to_numpy())
-    # Model-estimated demand at each markdown depth the policy can suggest (counterfactual on the
-    # discount features, learned from Rohlik's real historical discount variation).
-    for d in MARKDOWN_LEVELS:
-        cf = nf.copy()
-        cf["discount_max"], cf["any_discount"], cf["n_discount_types"] = d, 1, 1
-        nf[f"p50_if_markdown_{int(d * 100)}"] = cand.predict(cf)
-
-    # Inventory entering tomorrow = what the store's LEGACY practice leaves on the shelf (the
-    # situation on install day): order same-weekday-last-week sales plus a 90% service-level
-    # buffer (z90 x trailing 7-day std), through the same FIFO shelf. Labeled in the UI.
-    z80 = 0.8416
-    inv_rows = []
-    for (st, pid), g in hold.sort_values("date").groupby(["store_id", "product_id"], observed=True):
-        life = settings.shelf_life_days.get(str(g["category"].iloc[0]), 3)
-        legacy50 = g["seasonal_naive_7"].fillna(g["pred"]).to_numpy()
-        legacy80 = legacy50 + z80 * g["sales_roll_7_std"].fillna(0).to_numpy()
-        _, shelf = simulate_policy(g["sales"].to_numpy(), legacy50, legacy80, LEGACY_SERVICE_LEVEL, life)
-        inv_rows.append({"store_id": str(st), "product_id": str(pid), "on_hand": shelf.sellable_next_day(),
-                         "expiring_tomorrow": shelf.expiring_next_day(), "shelf_life": life})
-    inv = pd.DataFrame(inv_rows)
-    rec = nf[["store_id", "product_id", "name", "category", "sell_price_main", "p50", "p80", *[f"p50_if_markdown_{int(d * 100)}" for d in MARKDOWN_LEVELS],
-              "expected_customer_count", *om.WEATHER_FEATURES]].copy()
-    for c in ["store_id", "product_id", "category"]:
-        rec[c] = rec[c].astype(str)
-    rec = rec.merge(inv, on=["store_id", "product_id"], how="left").fillna({"on_hand": 0.0, "expiring_tomorrow": 0.0})
-    rec["forecast_date"] = str(tomorrow.date())
-    rec["as_of"] = str(as_of.date())
-    rec["model_version"] = version
-    rec.to_parquet(settings.artifacts_dir / "recommendations.parquet", index=False)
-
-    # Ledger: the predictions exist before their outcomes do.
-    created = _now()
-    preds = []
-    for _, r in rec.iterrows():
-        preds.append(dict(prediction_id=uuid.uuid4().hex, context="production", store_id=r["store_id"],
-                          product_id=r["product_id"], category=r["category"], prediction_created_at=created,
-                          forecast_date=tomorrow.date(), horizon=1, predicted_units=float(r["p50"]), p80_units=float(r["p80"]),
-                          weather_forecast={k: (None if pd.isna(r[k]) else float(r[k])) for k in om.WEATHER_FEATURES} | {"weather_source": "previous_runs_d1"},
-                          expected_customers=None if pd.isna(r["expected_customer_count"]) else float(r["expected_customer_count"]),
-                          model_version=version, feature_schema_version=FEATURE_SCHEMA_VERSION))
-    with engine.begin() as conn:
-        conn.execute(insert(S.predictions), preds)
+    rec = plan_existing_stores(engine, cand, version, log)
+    as_of, tomorrow = end, end + pd.Timedelta(days=1)
 
     # Weather cross-check: dataset's own precipitation vs Open-Meteo reanalysis (never merged).
     orders = rohlik.load_orders()

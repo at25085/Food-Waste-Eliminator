@@ -20,6 +20,9 @@ stores = Table(
     Column("store_id", String, primary_key=True),
     Column("city", String), Column("lat", Float), Column("lon", Float), Column("timezone", String),
     Column("traffic_connected", Boolean, nullable=False, default=False),
+    Column("country", String), Column("subdivision", String),
+    Column("kind", String),  # rohlik | sample | demo | owner
+    Column("label", Text),
 )
 
 model_versions = Table(
@@ -58,6 +61,7 @@ predictions = Table(
     Column("weather_forecast", JSON), Column("expected_customers", Float),
     Column("model_version", String, nullable=False),
     Column("feature_schema_version", String, nullable=False),
+    Column("recommended_order", Float),  # what we told the store to order (plan adherence)
 )
 
 outcomes = Table(
@@ -83,6 +87,30 @@ observations = Table(  # natural key → eligible for a Timescale hypertable
     Column("units_sold", Float), Column("price", Float), Column("availability", Float),
     Column("inventory", Float), Column("waste_units", Float),
     Column("source", String), Column("ingested_at", DateTime(timezone=True), nullable=False),
+    Column("units_received", Float), Column("discount", Float), Column("product_name", String),
+    Column("category", String), Column("upload_id", String),
+    Column("shelf_life_days", Float),  # owner-supplied; overrides the category default
+)
+
+batches = Table(  # optional batch sheet: one row per delivery, followed until it is gone
+    "batches", metadata,
+    Column("store_id", String, primary_key=True), Column("batch_id", String, primary_key=True),
+    Column("product_id", String, nullable=False), Column("product_name", String), Column("category", String),
+    Column("received_date", Date, nullable=False), Column("expiry_date", Date, nullable=False),
+    Column("quantity", Float, nullable=False), Column("sold", Float), Column("wasted", Float),
+    Column("upload_id", String), Column("ingested_at", DateTime(timezone=True), nullable=False),
+)
+
+uploads = Table(
+    "uploads", metadata,
+    Column("upload_id", String, primary_key=True),
+    Column("store_id", String, nullable=False), Column("filename", String),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("rows", Integer), Column("accepted", Integer), Column("quarantined", Integer),
+    Column("first_date", Date), Column("last_date", Date),
+    Column("outcomes_attached", Integer), Column("evaluated_days", Integer),
+    Column("summary", JSON),
+    Column("kind", String, default="daily"),  # daily | batch
 )
 
 quarantine = Table(
@@ -151,8 +179,24 @@ def get_engine(url: str | None = None) -> Engine:
     return create_engine(url, pool_pre_ping=True)
 
 
+def migrate(engine: Engine) -> None:
+    """Add columns that newer code expects to tables created by older code (additive only)."""
+    from sqlalchemy import inspect
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name not in have and not col.primary_key:
+                    ddl = col.type.compile(dialect=engine.dialect)
+                    conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN "{col.name}" {ddl}'))
+
+
 def create_all(engine: Engine) -> None:
     metadata.create_all(engine)
+    migrate(engine)
     if engine.dialect.name == "postgresql":
         with engine.begin() as conn:
             has_ts = conn.execute(text(

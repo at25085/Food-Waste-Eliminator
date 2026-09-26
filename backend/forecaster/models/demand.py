@@ -13,6 +13,9 @@ PARAMS = {
     "colsample_bytree": 0.8, "lambda": 5.0, "alpha": 0.5, "tree_method": "hist",
     "max_cat_to_onehot": 1, "max_bin": 256,
 }
+# One model, two outputs: the median (what WAPE rewards) and the 80th percentile (order sizing).
+PARAMS_MULTI_QUANTILE = {**{k: v for k, v in PARAMS.items() if k != "tweedie_variance_power"},
+                         "objective": "reg:quantileerror", "quantile_alpha": [0.5, 0.8]}
 MAX_ROUNDS = 1500
 EARLY_STOPPING = 50
 TRAFFIC_DROPOUT = 0.25  # train to work when a store has no traffic feed
@@ -39,9 +42,10 @@ def categories_of(X: pd.DataFrame) -> dict[str, list[str]]:
 
 
 def fit(train: pd.DataFrame, valid: pd.DataFrame, horizon: int = 1, params: dict | None = None,
-        seed: int = 7, exclude: tuple[str, ...] = (), weights: np.ndarray | None = None) -> tuple[xgb.Booster, dict]:
+        seed: int = 7, exclude: tuple[str, ...] = (), weights: np.ndarray | None = None,
+        multi_quantile: bool = False) -> tuple[xgb.Booster, dict]:
     names = [f for f in demand_feature_names(horizon) if f not in exclude]
-    params = {**PARAMS, **(params or {}), "seed": seed}
+    params = {**(PARAMS_MULTI_QUANTILE if multi_quantile else PARAMS), **(params or {}), "seed": seed}
     rng = np.random.default_rng(seed)
     train = train.copy()
     mask = rng.random(len(train)) < TRAFFIC_DROPOUT
@@ -56,7 +60,8 @@ def fit(train: pd.DataFrame, valid: pd.DataFrame, horizon: int = 1, params: dict
                         evals=[(dvalid, "valid")], early_stopping_rounds=EARLY_STOPPING,
                         verbose_eval=False)
     meta = {"feature_names": names, "categories": cats, "params": params,
-            "best_iteration": int(booster.best_iteration), "horizon": horizon}
+            "best_iteration": int(booster.best_iteration), "horizon": horizon, "multi_quantile": multi_quantile,
+            "traffic_dropout": True}
     return booster, meta
 
 
@@ -80,7 +85,7 @@ def refit(full: pd.DataFrame, meta: dict, es_fraction: float, seed: int = 7,
     first-party data — would only ever be used for validation, never learned from."""
     names, cats, params = meta["feature_names"], meta["categories"], meta["params"]
     full = full.copy()
-    if params.get("objective") == "reg:tweedie":
+    if meta.get("traffic_dropout", params.get("objective") == "reg:tweedie"):
         rng = np.random.default_rng(seed)
         mask = rng.random(len(full)) < TRAFFIC_DROPOUT
         full.loc[mask, [c for c in TRAFFIC if c in names]] = np.nan

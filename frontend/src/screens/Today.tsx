@@ -1,20 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { postJSON, qs, useApi, ApiError } from "../api";
-import type { LiveWeather, PromotionExperiment, RecItem, Recommendations, Store, WasteRisk } from "../types";
-import { Panel, RiskBadge, StateBlock, Sticker, WeatherGlyph } from "../components/ui";
+import type { LiveWeather, MarkdownStep, PromotionExperiment, RecItem, Recommendations, Store, WasteRisk } from "../types";
+import { Panel, RiskBadge, StateBlock, Sticker, StoreLabel, WeatherGlyph } from "../components/ui";
 import StorePicker from "../components/StorePicker";
 import { useToast } from "../components/toast";
-import { day, int, isNum, num, spct, weatherText } from "../format";
+import { day, int, isNum, num, shortDay, spct, weatherText } from "../format";
 
 const RISK_ORDER: Record<WasteRisk, number> = { high: 0, watch: 1, low: 2 };
-type SortKey = "risk" | "name" | "category" | "p50" | "p80" | "order_qty" | "on_hand" | "expiring_tomorrow" | "markdown" | "lift";
+type SortKey = "risk" | "name" | "category" | "p50" | "p80" | "order_qty" | "on_hand" | "expiring_tomorrow" | "markdown" | "plan";
 
 const MARGIN_RATIO = 0.3; // mirrors decisions.policy.critical_ratio default (cu)
 
 export default function Today(props: { stores: Store[]; store: string | null; setStore: (s: string) => void }) {
   const { store } = props;
-  const [wcr, setWcr] = useState(0.5);
-  const [wcrQuery, setWcrQuery] = useState(0.5);
+  // Starts at the backend's default operating point (~5% lost sales); the manager can move it.
+  const [wcr, setWcr] = useState(0.1);
+  const [wcrQuery, setWcrQuery] = useState(0.1);
   const [category, setCategory] = useState<string>("all");
   const [risk, setRisk] = useState<"all" | WasteRisk | "markdown">("all");
   const [search, setSearch] = useState("");
@@ -63,7 +64,7 @@ export default function Today(props: { stores: Store[]; store: string | null; se
   const rows = useMemo(() => {
     let items = data?.items ?? [];
     if (category !== "all") items = items.filter((i) => i.category === category);
-    if (risk === "markdown") items = items.filter((i) => i.markdown > 0);
+    if (risk === "markdown") items = items.filter(hasMarkdown);
     else if (risk !== "all") items = items.filter((i) => i.waste_risk === risk);
     const q = search.trim().toLowerCase();
     if (q) items = items.filter((i) => (i.name ?? "").toLowerCase().includes(q) || i.product_id.includes(q));
@@ -75,8 +76,8 @@ export default function Today(props: { stores: Store[]; store: string | null; se
           return (i.name ?? i.product_id).toLowerCase();
         case "category":
           return i.category;
-        case "lift":
-          return i.markdown_lift_estimate ?? -Infinity;
+        case "plan":
+          return i.surplus_units ?? 0;
         default:
           return i[sort.key] as number;
       }
@@ -94,7 +95,7 @@ export default function Today(props: { stores: Store[]; store: string | null; se
       p50: items.reduce((s, i) => s + i.p50, 0),
       high: items.filter((i) => i.waste_risk === "high").length,
       watch: items.filter((i) => i.waste_risk === "watch").length,
-      markdowns: items.filter((i) => i.markdown > 0).length,
+      markdowns: items.filter(hasMarkdown).length,
       expiring: items.reduce((s, i) => s + i.expiring_tomorrow, 0),
     };
   }, [data]);
@@ -160,6 +161,7 @@ export default function Today(props: { stores: Store[]; store: string | null; se
           <h1 className="display">Tomorrow's order plan</h1>
           <p className="screen__lede">
             {storeInfo ? `${storeInfo.store_id.replace("_", " ")}, ${storeInfo.city}` : "Pick a store"}
+            {storeInfo?.label && <> <StoreLabel store={storeInfo} /></>}
             {data?.forecast_date && (
               <>
                 {" "}
@@ -173,7 +175,11 @@ export default function Today(props: { stores: Store[]; store: string | null; se
 
       <p className="honesty">
         <span className="honesty__tag">Read this first</span>
-        Inventory &amp; waste are simulated; forecasts are real model output.
+        {data?.real_stock ? (
+          <>Stock from this store's uploaded sheets; forecasts are real model output.</>
+        ) : (
+          <>Inventory &amp; waste are simulated; forecasts are real model output.</>
+        )}
         {data?.inventory_basis && <> {data.inventory_basis}</>}
       </p>
 
@@ -217,10 +223,10 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                 </dd>
               </div>
               <div>
-                <dt>Expected customers</dt>
+                <dt>Customers per day</dt>
                 <dd>
-                  {int(data.expected_customers)}
-                  <span className="facts__note">stage-1 traffic forecast (orders/day)</span>
+                  {int(data.recent_customers_7d)}
+                  <span className="facts__note">7-day average (orders/day)</span>
                 </dd>
               </div>
               <div className="facts__wide">
@@ -354,6 +360,16 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                 <option value="markdown">Has markdown</option>
               </select>
               <input type="search" placeholder="Find item" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Find item" />
+              {store && (
+                <a
+                  className="btn btn--sm"
+                  href={`/api/stores/${encodeURIComponent(store)}/plan.csv${qs({ waste_cost_ratio: wcr.toFixed(2) })}`}
+                  download
+                  title={`Full plan at a waste cost of ${wcr.toFixed(2)}× price`}
+                >
+                  Download plan (CSV)
+                </a>
+              )}
             </div>
           )
         }
@@ -391,7 +407,7 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                   {header("expiring_tomorrow", "Expiring tmrw")}
                   {header("risk", "Waste risk", "")}
                   {header("markdown", "Markdown", "")}
-                  {header("lift", "Est. lift at suggested markdown")}
+                  {header("plan", "Markdown plan", "")}
                   <th>Surplus plan</th>
                 </tr>
               </thead>
@@ -399,6 +415,7 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                 {rows.map((i) => {
                   const d = deltas?.map.get(i.product_id);
                   const exp = accepted.get(i.product_id);
+                  const later = laterStart(i);
                   return (
                     <tr key={i.product_id} className={`risk-row--${i.waste_risk}`}>
                       <td className="item">
@@ -425,6 +442,11 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                       </td>
                       <td className="md">
                         <Sticker depth={i.markdown} />
+                        {later && (
+                          <span className="md__later" title={i.schedule_text ?? undefined}>
+                            from {shortDay(later.date)}
+                          </span>
+                        )}
                         {i.markdown > 0 &&
                           (exp ? (
                             <span className="md__done" title={`Experiment ${exp.experiment_id}`}>
@@ -436,12 +458,8 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                             </button>
                           ))}
                       </td>
-                      <td className={`num ${i.markdown > 0 ? "" : "muted"}`} title={i.markdown > 0 ? `Model-estimated demand change at ${Math.round(i.markdown * 100)}% off` : undefined}>
-                        {i.markdown > 0
-                          ? (i.markdown_lift_estimate ?? 0) > 0
-                            ? `${spct(i.markdown_lift_estimate, 0)} @ ${Math.round(i.markdown * 100)}%`
-                            : `no lift found @ ${Math.round(i.markdown * 100)}%`
-                          : "—"}
+                      <td className="mdplan" title={i.schedule_text ?? undefined}>
+                        <MarkdownPlan item={i} />
                       </td>
                       <td className="muted">{SURPLUS_LABEL[i.surplus_action ?? "sell"]}{(i.donate_units ?? 0) > 0 ? ` (${num(i.donate_units, 0)})` : ""}</td>
                     </tr>
@@ -454,7 +472,10 @@ export default function Today(props: { stores: Store[]; store: string | null; se
         {data && (
           <p className="note note--pad">
             Order = forecast quantile for the chosen cost ratio, minus fresh stock still sellable tomorrow. Waste risk compares units
-            expiring tomorrow with P50 demand. Lift is the model's own estimate: demand forecast with a 30% discount vs. without.
+            expiring tomorrow with P50 demand. Markdown plan: the smallest discount that clears the projected surplus before it
+            expires, started only as early as needed, then donate what it can't clear. Discount response is this store's measured
+            response when it has enough promotion days, otherwise the model's estimate from historical discounts. Hover a plan for
+            the full schedule.
           </p>
         )}
       </Panel>
@@ -640,7 +661,70 @@ function ManagerNotes({ store }: { store: string }) {
 
 const SURPLUS_LABEL: Record<string, string> = {
   sell: "Sells through",
+  markdown_later: "Discount later",
   markdown: "Markdown clears it",
   markdown_then_donate: "Markdown, then donate",
   donate: "Donate",
 };
+
+/** Any markdown in the plan, tomorrow or later. */
+function hasMarkdown(i: RecItem): boolean {
+  return i.markdown > 0 || (i.markdown_schedule?.length ?? 0) > 0;
+}
+
+/** First markdown step when nothing is discounted tomorrow. */
+function laterStart(i: RecItem): MarkdownStep | undefined {
+  const steps = i.markdown_schedule ?? [];
+  if (!steps.length || i.markdown > 0) return undefined;
+  return [...steps].sort((a, b) => a.date.localeCompare(b.date))[0];
+}
+
+/** Steps for separate shelf cohorts can share a date and depth; show each (date, depth) once. */
+function mergedSteps(steps: MarkdownStep[]): MarkdownStep[] {
+  const m = new Map<string, MarkdownStep>();
+  for (const st of steps) {
+    const k = `${st.date}|${st.discount}`;
+    const prev = m.get(k);
+    m.set(k, prev ? { ...prev, units: prev.units + st.units } : { ...st });
+  }
+  return [...m.values()].sort((a, b) => a.date.localeCompare(b.date) || a.discount - b.discount);
+}
+
+function liftSourceLabel(src: string | null | undefined): string | null {
+  if (!src || src === "none") return null;
+  if (src.includes("measured")) return "store-measured";
+  if (src.includes("trained model")) return "trained model";
+  if (src.includes("model")) return "model estimate";
+  if (src.includes("default")) return "default";
+  return src;
+}
+
+/** Compact schedule, e.g. "20% from 27 Sep → donate ~6 28 Sep"; the full sentence is the cell's tooltip. */
+function MarkdownPlan({ item: i }: { item: RecItem }) {
+  const steps = mergedSteps(i.markdown_schedule ?? []);
+  const donate = (i.donate_units ?? 0) >= 0.5;
+  if (!steps.length && !donate) return <span className="muted">—</span>;
+  const src = steps.length ? liftSourceLabel(i.lift_source) : null;
+  return (
+    <>
+      <span className="mdplan__line">
+        {steps.map((st, k) => (
+          <span key={`${st.date}-${st.discount}`}>
+            {k > 0 && " → "}
+            <strong>{Math.round(st.discount * 100)}%</strong> from {shortDay(st.date)}
+          </span>
+        ))}
+        {donate && (
+          <span className="mdplan__donate">
+            {steps.length > 0 && " → "}donate ~{num(i.donate_units, 0)}
+            {i.donate_date && ` ${shortDay(i.donate_date)}`}
+          </span>
+        )}
+      </span>
+      {src && <span className="mdplan__src">{src}</span>}
+      {steps.length > 0 && (i.money_kept_vs_no_action ?? 0) > 0.5 && (
+        <span className="mdplan__src">keeps {num(i.money_kept_vs_no_action, 0)} more than no discount</span>
+      )}
+    </>
+  );
+}

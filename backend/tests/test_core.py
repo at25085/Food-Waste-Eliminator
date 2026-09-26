@@ -150,3 +150,43 @@ def test_impact_uses_cited_factors():
     assert 2.6 < CO2E_KG_PER_KG < 2.7 and 0.5 < KG_PER_MEAL < 0.6  # WRAP 16/6.0; ReFED ≈1.22 lb/meal
     out = units_to_impact({"Bakery": 100.0})  # 100 × 0.1 kg assumed
     assert out["kg_assumed"] == pytest.approx(10.0) and out["co2e_kg"] == pytest.approx(10 * CO2E_KG_PER_KG)
+
+
+def test_discount_chosen_by_money_not_just_clearance():
+    from forecaster.decisions.markdown_plan import plan
+    # 10/day demand at price 1, 30 units that expire after 2 days → 10 would spoil.
+    # 20% off lifts demand 50%: sells all 30 (revenue 24) vs. full price 20 revenue − disposal → discount wins.
+    p = plan([(30, 2)], 10, price=1.0, lift_at={0.2: 0.5})
+    assert [(s.discount, s.day) for s in p.steps] == [(0.2, 0)] and p.donate_units == 0
+    assert p.money_plan > p.money_no_action
+    # Same surplus but a weak response (20% off → only +5%): the discount would give away more on the
+    # units that sell anyway than it saves → no discount, donate the surplus.
+    p = plan([(30, 2)], 10, price=1.0, lift_at={0.2: 0.05})
+    assert p.steps == [] and round(p.donate_units) == 10
+
+
+def test_discount_starts_as_late_as_pays():
+    from forecaster.decisions.markdown_plan import plan
+    # 25 units over 2 days at 10/day → 5 spare. A 1-day discount on the last day is enough, so it
+    # shouldn't discount tomorrow's full-price sales too.
+    p = plan([(25, 2)], 10, price=1.0, lift_at={0.2: 0.5})
+    assert [(s.discount, s.day, s.days) for s in p.steps] == [(0.2, 1, 1)]
+
+
+def test_lift_is_made_monotone():
+    from forecaster.decisions.markdown_plan import monotone
+    assert monotone({0.2: 0.3, 0.3: -0.1, 0.6: 0.2})[0.3] == 0.3  # a deeper discount never sells less
+
+
+def test_older_cohorts_sell_first():
+    from forecaster.decisions.markdown_plan import project_unsold
+    # 10/day: the 1-day cohort (12) leaves 2 unsold; the 3-day cohort gets 30 capacity minus 10 used
+    assert project_unsold([(12, 1), (15, 3)], 10) == [(2, 1)]
+
+
+def test_stockout_days_detected_from_owner_sheets():
+    from forecaster.pipeline.store_learning import stock_availability
+    panel = pd.DataFrame({"product_id": ["a"] * 3, "date": pd.date_range("2026-09-20", periods=3),
+                          "units_received": [20, 10, 10], "sales": [15, 15, 8], "stock_end": [5, 0, 2]})
+    # day 2: 5 left + 10 delivered, all 15 sold, shelf empty → stockout (sales capped)
+    assert stock_availability(panel).tolist() == [1.0, 0.5, 1.0]

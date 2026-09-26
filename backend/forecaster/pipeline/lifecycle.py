@@ -18,7 +18,7 @@ ES_VALID_DAYS = 49  # early-stopping window inside the candidate's own training 
 
 PRODUCE = "Fruit and vegetable"
 DEFAULT_CONFIG = {"censor_stockouts": False, "produce_specialist": False, "store_calibration": False,
-                  "volatility_weight": False}
+                  "volatility_weight": False, "single_model": False}
 
 
 @dataclass
@@ -34,8 +34,14 @@ class Candidate:
     specialist_meta: dict | None = None
     calibration: dict = field(default_factory=dict)  # store_id -> multiplier (L3 calibration)
 
+    @property
+    def single(self) -> bool:
+        return bool(self.meta.get("multi_quantile"))
+
     def predict(self, df: pd.DataFrame, drop_traffic: bool = False) -> np.ndarray:
         pred = demand.predict(self.booster, self.meta, df, drop_traffic=drop_traffic)
+        if self.single:
+            pred = pred[:, 0].copy()
         if self.specialist is not None:
             m = (df["category"].astype(str) == PRODUCE).to_numpy()
             if m.any():
@@ -43,7 +49,10 @@ class Candidate:
         return pred * self._multipliers(df)
 
     def predict_p80(self, df: pd.DataFrame, p50: np.ndarray | None = None) -> np.ndarray:
-        p80 = demand.predict(self.p80_booster, self.p80_meta, df) * self._multipliers(df)
+        if self.single:
+            p80 = demand.predict(self.booster, self.meta, df)[:, 1] * self._multipliers(df)
+        else:
+            p80 = demand.predict(self.p80_booster, self.p80_meta, df) * self._multipliers(df)
         return np.maximum(p80, p50 if p50 is not None else self.predict(df))
 
     def _multipliers(self, df: pd.DataFrame) -> np.ndarray:
@@ -52,9 +61,10 @@ class Candidate:
         return df["store_id"].astype(str).map(self.calibration).fillna(1.0).to_numpy(dtype="float64")
 
 
-def _fit_refit(tr, va, snap, exclude, weights_fn):
+def _fit_refit(tr, va, snap, exclude, weights_fn, multi_quantile=False):
     """Early stopping on `va` picks the tree count; then refit on the whole snapshot."""
-    booster, meta = demand.fit(tr, va, exclude=exclude, weights=weights_fn(tr) if weights_fn else None)
+    booster, meta = demand.fit(tr, va, exclude=exclude, weights=weights_fn(tr) if weights_fn else None,
+                               multi_quantile=multi_quantile)
     es_booster, es_meta = booster, dict(meta)
     es_fraction = len(va) / max(len(tr), 1)
     booster, meta = demand.refit(snap, meta, es_fraction, weights=weights_fn(snap) if weights_fn else None)
@@ -82,9 +92,12 @@ def train_candidate(rows: pd.DataFrame, cutoff: pd.Timestamp, start: pd.Timestam
     es_start = cutoff - pd.Timedelta(days=ES_VALID_DAYS)
     tr, va = snap[snap["date"] <= es_start], snap[snap["date"] > es_start]
     wfn = demand.volatility_weights if cfg["volatility_weight"] else None
-    booster, meta, es_booster, es_meta, es_fraction = _fit_refit(tr, va, snap, exclude, wfn)
-    p80, p80_meta = demand.fit_quantile(tr, va, es_meta)
-    p80, p80_meta = demand.refit(snap, p80_meta, es_fraction)
+    booster, meta, es_booster, es_meta, es_fraction = _fit_refit(tr, va, snap, exclude, wfn, cfg["single_model"])
+    if cfg["single_model"]:
+        p80, p80_meta = None, None  # the same booster's second output
+    else:
+        p80, p80_meta = demand.fit_quantile(tr, va, es_meta)
+        p80, p80_meta = demand.refit(snap, p80_meta, es_fraction)
 
     spec = spec_meta = es_spec = es_spec_meta = None
     if cfg["produce_specialist"]:
@@ -113,7 +126,7 @@ def train_candidate(rows: pd.DataFrame, cutoff: pd.Timestamp, start: pd.Timestam
 
 
 def extra_models(c: Candidate) -> dict:
-    out = {"p80": c.p80_booster}
+    out = {"p80": c.p80_booster} if c.p80_booster is not None else {}
     if c.specialist is not None:
         out["produce"] = c.specialist
     return out

@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     api_token: str | None = None
     max_upload_bytes: int = 5 * 1024 * 1024
 
+    # Stage-1 traffic forecast as a demand-model input. Measured (architecture_study.json): removing
+    # it improved WAPE 15.24% → 15.10% because recent customer counts are already inputs, so it is
+    # off by default; the code path stays for stores where it may help.
+    use_traffic_forecast: bool = False
+
     # Promotion policy (docs/ARCHITECTURE.md §6.4)
     min_new_days_for_retrain: int = 14
     min_global_wape_improvement: float = 0.02  # relative: challenger <= champion * (1 - 0.02)
@@ -58,11 +63,11 @@ settings = Settings()
 
 # Rohlik warehouses → coordinates for Open-Meteo joins.
 STORE_LOCATIONS: dict[str, dict] = {
-    "Prague_1": {"city": "Prague", "lat": 50.0755, "lon": 14.4378, "tz": "Europe/Prague"},
-    "Prague_2": {"city": "Prague", "lat": 50.0755, "lon": 14.4378, "tz": "Europe/Prague"},
-    "Prague_3": {"city": "Prague", "lat": 50.0755, "lon": 14.4378, "tz": "Europe/Prague"},
-    "Brno_1": {"city": "Brno", "lat": 49.1951, "lon": 16.6068, "tz": "Europe/Prague"},
-    "Budapest_1": {"city": "Budapest", "lat": 47.4979, "lon": 19.0402, "tz": "Europe/Budapest"},
-    "Munich_1": {"city": "Munich", "lat": 48.1351, "lon": 11.5820, "tz": "Europe/Berlin"},
-    "Frankfurt_1": {"city": "Frankfurt", "lat": 50.1109, "lon": 8.6821, "tz": "Europe/Berlin"},
+    "Prague_1": {"city": "Prague", "lat": 50.0755, "lon": 14.4378, "tz": "Europe/Prague", "country": "CZ", "subdiv": None},
+    "Prague_2": {"city": "Prague", "lat": 50.0755, "lon": 14.4378, "tz": "Europe/Prague", "country": "CZ", "subdiv": None},
+    "Prague_3": {"city": "Prague", "lat": 50.0755, "lon": 14.4378, "tz": "Europe/Prague", "country": "CZ", "subdiv": None},
+    "Brno_1": {"city": "Brno", "lat": 49.1951, "lon": 16.6068, "tz": "Europe/Prague", "country": "CZ", "subdiv": None},
+    "Budapest_1": {"city": "Budapest", "lat": 47.4979, "lon": 19.0402, "tz": "Europe/Budapest", "country": "HU", "subdiv": None},
+    "Munich_1": {"city": "Munich", "lat": 48.1351, "lon": 11.5820, "tz": "Europe/Berlin", "country": "DE", "subdiv": "BY"},
+    "Frankfurt_1": {"city": "Frankfurt", "lat": 50.1109, "lon": 8.6821, "tz": "Europe/Berlin", "country": "DE", "subdiv": "HE"},
 }

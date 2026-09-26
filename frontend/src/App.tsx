@@ -7,10 +7,12 @@ import ModelHealth from "./screens/ModelHealth";
 import LearningLoop from "./screens/LearningLoop";
 import Ledger from "./screens/Ledger";
 import Impact from "./screens/Impact";
+import StoreData from "./screens/StoreData";
 
-type Route = "today" | "impact" | "health" | "loop" | "ledger";
+type Route = "today" | "data" | "impact" | "health" | "loop" | "ledger";
 const ROUTES: { id: Route; label: string; hint: string }[] = [
   { id: "today", label: "Today's plan", hint: "Orders, waste risk, markdowns" },
+  { id: "data", label: "Store data", hint: "Upload sheets, learning status" },
   { id: "impact", label: "Impact", hint: "Waste, CO₂e and meals avoided" },
   { id: "health", label: "Model health", hint: "Accuracy, baselines, data sources" },
   { id: "loop", label: "Learning loop", hint: "Backtest replay, promotions" },
@@ -89,8 +91,8 @@ export default function App() {
           </nav>
           <div className="rail__foot">
             <p>
-              Forecasts are real model output on Rohlik sales data. Inventory and waste are simulated. Backtest screens are
-              labeled as replays.
+              Forecasts are real model output. Rohlik stores: real sales, simulated inventory and waste. Uploaded stores use
+              their own sheets and carry a label saying where the data came from. Backtest screens are labeled as replays.
             </p>
           </div>
         </aside>
@@ -105,6 +107,7 @@ export default function App() {
             </div>
           )}
           {route === "today" && <Today stores={storeList} store={store} setStore={setStore} />}
+          {route === "data" && <StoreData stores={storeList} store={store} setStore={setStore} reloadStores={stores.reload} />}
           {route === "impact" && <Impact />}
           {route === "health" && <ModelHealth stores={storeList} store={store} setStore={setStore} meta={meta.data} />}
           {route === "loop" && <LearningLoop meta={meta.data} />}

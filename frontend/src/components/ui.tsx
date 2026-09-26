@@ -235,3 +235,14 @@ export function Meter({ value, max, label }: { value: number; max: number; label
     </div>
   );
 }
+
+/** Honesty label for a store's data ("Demo store — team-authored data", …). Renders nothing when
+ *  the store has no label (the original Rohlik warehouses). */
+export function StoreLabel({ store }: { store: { kind?: string | null; label?: string | null } | undefined }) {
+  if (!store?.label) return null;
+  return (
+    <span className={`storelabel storelabel--${store.kind ?? "other"}`} title="Where this store's data comes from">
+      {store.label}
+    </span>
+  );
+}

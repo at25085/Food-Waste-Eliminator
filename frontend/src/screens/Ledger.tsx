@@ -4,7 +4,13 @@ import type { LedgerRow, Store } from "../types";
 import { Panel, Segmented, StateBlock, WeatherGlyph } from "../components/ui";
 import { day, isNum, num, signed, stamp, wape, weatherText } from "../format";
 
-type Ctx = "replay" | "production";
+type Ctx = "replay" | "production" | "store_eval";
+
+const CTX_TITLE: Record<Ctx, string> = {
+  replay: "Backtest predictions (historical replay, not live customers)",
+  production: "Production predictions",
+  store_eval: "Graded uploads: what the serving model would have predicted for each uploaded day it never trained on",
+};
 
 export default function Ledger({ stores }: { stores: Store[] }) {
   const [ctx, setCtx] = useState<Ctx>("replay");
@@ -42,6 +48,7 @@ export default function Ledger({ stores }: { stores: Store[] }) {
           options={[
             { value: "replay", label: "Backtest replay" },
             { value: "production", label: "Production" },
+            { value: "store_eval", label: "Graded uploads (retroactive)", title: "Retroactive forecasts for owner-uploaded days, graded against what the sheet says sold" },
           ]}
         />
       </header>
@@ -59,7 +66,7 @@ export default function Ledger({ stores }: { stores: Store[] }) {
 
       <Panel
         flush
-        title={ctx === "replay" ? "Backtest predictions (historical replay, not live customers)" : "Production predictions"}
+        title={CTX_TITLE[ctx]}
         sub={
           q.data
             ? `${summary.n} most recent rows${summary.withOutcome ? `, ${summary.withOutcome} with outcomes (WAPE ${wape(summary.wape)})` : ""}${
@@ -74,6 +81,7 @@ export default function Ledger({ stores }: { stores: Store[] }) {
               {stores.map((s) => (
                 <option key={s.store_id} value={s.store_id}>
                   {s.store_id.replace("_", " ")}
+                  {s.kind === "demo" || s.kind === "sample" ? ` (${s.kind})` : ""}
                 </option>
               ))}
             </select>
@@ -84,6 +92,14 @@ export default function Ledger({ stores }: { stores: Store[] }) {
               <option value={500}>500 rows</option>
               <option value={1000}>1,000 rows</option>
             </select>
+            <a
+              className="btn btn--sm"
+              href={`/api/ledger.csv${qs({ context: ctx, store: store || undefined })}`}
+              download
+              title="Every row for this context and store (not just the rows shown)"
+            >
+              Download CSV
+            </a>
           </div>
         }
       >
@@ -93,7 +109,12 @@ export default function Ledger({ stores }: { stores: Store[] }) {
           <StateBlock
             empty
             emptyText={
-              ctx === "production" ? (
+              ctx === "store_eval" ? (
+                <>
+                  <strong>No graded uploads{store ? ` for ${store}` : ""}.</strong> They're written when a store uploads a daily sheet
+                  covering days after the model's training data (Store data screen).
+                </>
+              ) : ctx === "production" ? (
                 <>
                   <strong>No production predictions yet.</strong> They're written when the production pipeline builds tomorrow's plan.
                 </>

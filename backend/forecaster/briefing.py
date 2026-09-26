@@ -29,7 +29,7 @@ def build_facts(rec: dict, health: dict | None, recent: dict | None, notes: list
     return {
         "store": rec["store_id"], "forecast_date": rec["forecast_date"],
         "model_version": rec["model_version"],
-        "expected_customers": round(rec["expected_customers"]) if rec.get("expected_customers") else None,
+        "customers_per_day_last_7_days": round(rec["recent_customers_7d"]) if rec.get("recent_customers_7d") else None,
         "weather": {k.replace("weather_", ""): v for k, v in rec["weather"].items() if v is not None},
         "total_forecast_units": round(sum(i["p50"] for i in items)),
         "items_at_high_waste_risk": len([i for i in items if i["waste_risk"] == "high"]),
@@ -49,7 +49,8 @@ def build_facts(rec: dict, health: dict | None, recent: dict | None, notes: list
 def template(f: dict) -> str:
     parts = [f"Good morning. For {f['forecast_date']}, the model ({f['model_version']}) expects about "
              f"{f['total_forecast_units']} units of fresh demand"
-             + (f" from roughly {f['expected_customers']} customers." if f["expected_customers"] else ".")]
+             + (f", with about {f['customers_per_day_last_7_days']} customers a day lately."
+                if f["customers_per_day_last_7_days"] else ".")]
     if f["waste_risk_items"]:
         names = ", ".join(f"{i['name']} ({i['suggested_markdown_pct']}% off)" for i in f["waste_risk_items"])
         parts.append(f"{f['items_at_high_waste_risk']} items are at high risk of waste; start with {names}.")

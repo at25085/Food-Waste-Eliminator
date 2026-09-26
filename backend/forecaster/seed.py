@@ -43,7 +43,12 @@ def seed_stores(engine, traffic_connected: bool = True) -> None:
     with engine.begin() as conn:
         existing = {r[0] for r in conn.execute(select(S.stores.c.store_id))}
         rows = [dict(store_id=s, city=l["city"], lat=l["lat"], lon=l["lon"], timezone=l["tz"],
-                     traffic_connected=traffic_connected)
+                     traffic_connected=traffic_connected, kind="rohlik", country=l["country"],
+                     subdivision=l["subdiv"], label="Rohlik warehouse — real sales history (online grocer)")
                 for s, l in STORE_LOCATIONS.items() if s not in existing]
         if rows:
             conn.execute(insert(S.stores), rows)
+        for s, l in STORE_LOCATIONS.items():  # label the built-in warehouses (also fixes older databases)
+            conn.execute(S.stores.update().where((S.stores.c.store_id == s) & S.stores.c.kind.is_(None)).values(
+                kind="rohlik", country=l["country"], subdivision=l["subdiv"],
+                label="Rohlik warehouse — real sales history (online grocer)"))

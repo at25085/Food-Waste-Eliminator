@@ -92,16 +92,30 @@ version it was trained on, and serving refuses to use a model whose schema diffe
 
 ## 4. Models
 
-### 4.1 Stage 1 — customer traffic
-`expected_customer_count` per store-day from weekday, month, holidays, weather forecast, lagged
-traffic. XGBoost regressor. Training rows for stage 2 use **out-of-fold, time-respecting**
-stage-1 predictions (expanding-window cross-fitting), so stage 2 never trains on a traffic value
-it could not have had.
+**One demand model design, XGBoost throughout.** There is a single global model that serves every
+store, plus its upper-range twin:
 
-### 4.2 Stage 2 — product demand
-XGBoost (`reg:tweedie`, histogram trees, native categorical), one global model across products and
-stores (Level 1–2 personalization: global + store identity). Target: daily sales.
-Also trained: P50 point and a P80 quantile model (`reg:quantileerror`) for order sizing.
+| Model | Objective | Role |
+|---|---|---|
+| Demand (P50) | `reg:tweedie` | Units sold per product per day, all stores, all categories |
+| Upper range (P80) | `reg:quantileerror` α=0.8 | Same features; sizes orders safely |
+
+Everything else — markdown schedule, order quantities, waste simulation, adherence, sell-through,
+impact — is arithmetic on top of the trained forecast, not another model.
+
+### 4.1 What was measured and removed (architecture_study.json)
+- **Stage-1 traffic forecast** (`expected_customer_count` as an input): removing it improved WAPE
+  15.24% → 15.10% — recent customer counts are already inputs. Off by default
+  (`use_traffic_forecast`); the out-of-fold code path stays for stores where it may help.
+- **One multi-quantile model for P50 + P80**: WAPE 15.24% → 17.28%, bakery 24% worse. Rejected; the
+  Tweedie mean model plus a separate P80 model stays.
+
+### 4.2 Demand model details
+Histogram trees, native categoricals, traffic-feature dropout in training (so it works for stores
+without a traffic feed), early stopping on the last 7 weeks of a snapshot, then a refit on the whole
+snapshot. The discount features (depth, seven discount types, last week's discount) mean the model
+itself learns how sales respond to a markdown — from Rohlik's discount days and from every uploaded
+store's discount days.
 
 ### 4.3 Baselines (always reported)
 seasonal-naive (lag 7) and 28-day rolling mean. A model that does not beat both is not promoted.
@@ -129,18 +143,27 @@ Kept only if WAPE drops ≥ 0.003 with no major category > 5% worse; results in
 ## 5. Decisions (the operational loop)
 
 - **Order quantity**: shelf-life-aware newsvendor. Critical ratio `cu / (cu + co)` from
-  stockout cost vs. waste cost (configurable, slider in UI) → pick the forecast quantile, **net of
-  units still sellable tomorrow** (FIFO: last-day units sell first). The API and the waste simulator
-  use the same rule, and model vs. baseline are simulated with the same ordering function, so the
-  comparison measures forecast skill only.
-- **Waste risk**: projected on-hand (simulated inventory) over remaining shelf life minus the
-  cumulative forecast; risk if positive.
-- **Markdown suggestion**: hackathon heuristic (depth by days-to-expiry and excess ratio), with a
-  model-based lift estimate (predict with and without the discount). Markdowns only lower
-  prices; never surge pricing.
-- **Promotion experiment record** for every markdown: product, discount, window, inventory
-  before, forecast_without_promotion, actual sales, inventory after, waste after, revenue. This
-  accumulates the data that later replaces the heuristic with learned, store-specific elasticity.
+  stockout cost vs. waste cost (slider in UI; default at the ~5% lost-sales operating point) → the
+  forecast quantile, **net of units still sellable tomorrow**. The API and the waste simulator use
+  the same rule; model vs. baseline are simulated with the same ordering function.
+- **Stock by age (cohorts)**: from the owner's batch sheet when present (real expiry dates),
+  otherwise replayed first-in-first-out from the daily sheet (received, sold, wasted), using the
+  owner's shelf life per product, else one learned from the batch sheet, else the category default.
+- **Markdown = the discount that loses the least money** (`decisions/markdown_plan.py`). Every
+  option "d% off from day s until expiry" and "no discount" is simulated day by day with the trained
+  model's predicted sales at that discount: revenue at that price (a discount applies to every unit
+  sold that day, including ones that would have sold anyway) − cost of units bought to cover demand
+  beyond current stock − disposal of what still spoils. The best option wins, often a short, late,
+  shallow discount — or no discount when the response is too weak to pay for itself. What still
+  spoils is routed to donation (EPA Wasted Food Scale: prevent → donate). Days after tomorrow use
+  tomorrow's forecast carried forward (labeled approximation).
+- **Plan adherence**: every forecast stores the recommended order. When the store's next sheet
+  arrives, what they actually received is compared with it, and waste in the shelf-life window
+  after an over-order is attributed to the over-order (capped at the excess).
+- **Promotion experiment records** are created automatically for every graded uploaded day with a
+  discount (forecast without the discount vs. actual sales). The store's measured response is shown
+  next to the model's prediction as a check; the model, retrained on those days, is the source of
+  truth.
 
 Shelf lives (simulator defaults, configurable): Fruit & vegetable 3 d, Bakery 2 d, Meat & fish 4 d.
 
@@ -202,6 +225,22 @@ for validation and never learned from (a bug we caught in the first replay: ever
 The evaluation window stays strictly after the snapshot, so the comparison is still on unseen data,
 and the artifact that was evaluated is exactly the artifact that is promoted. Rollback re-points the champion to any previous version and writes a
 `champion_history` row. Overfitting guard: warn if validation WAPE / train WAPE > 1.5.
+
+### 6.4b Owner uploads → one global model learns
+- **Daily sheet (required)**: date, product, received, sold, wasted, price, discount, closing stock,
+  customers, shelf life. **Batch sheet (optional)**: one row per delivery with expiry date, sold and
+  wasted — real expiry-aware stock, learned shelf lives, exact sell-through.
+- Validation quarantines negatives, duplicates, future dates, unknown categories, stock that doesn't
+  balance (yesterday's closing + received − sold − wasted ≠ today's closing), and waste larger than
+  what was on hand; rejected rows come back to the owner as a CSV.
+- Accepted rows attach real outcomes to forecasts made for those days and grade the serving model on
+  uploaded days it never trained on (context `store_eval`, labeled retroactive).
+- Stockout days are detected from the sheets (shelf ended empty after selling everything on hand)
+  and fed to the model's in-stock inputs, so capped sales aren't read as low demand.
+- Once a store has 14 + 14 new days, a **challenger of the one global model** is trained on all
+  stores + that store's sheets and judged on days neither version saw: better for the uploading
+  store under the usual rules **and** no more than 1% worse overall / 5% per category on the
+  existing stores. Then it replaces the champion for every store and all plans are regenerated.
 
 ### 6.5 Honest hackathon demonstration
 - **Model Health panel**: current champion, training range + weather source, measured test WAPE,
