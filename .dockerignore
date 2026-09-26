@@ -1,0 +1,7 @@
+**/node_modules
+**/.venv
+frontend/dist
+data/
+**/__pycache__
+**/.env
+artifacts/baseline_*

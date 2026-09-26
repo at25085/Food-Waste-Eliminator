@@ -1,0 +1,18 @@
+# data & artifacts
+data/raw/
+data/cache/
+data/processed/
+artifacts/
+*.parquet
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+# node
+node_modules/
+frontend/dist/
+# env
+.env
+*.db
