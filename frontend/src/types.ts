@@ -60,6 +60,8 @@ export interface RecItem extends Partial<WeatherFeatures> {
   markdown: number;
   markdown_lift_estimate: number | null;
   waste_risk: WasteRisk;
+  surplus_action?: "sell" | "markdown" | "markdown_then_donate" | "donate";
+  donate_units?: number;
 }
 
 export interface Recommendations {
@@ -73,6 +75,8 @@ export interface Recommendations {
   expected_customers: number | null;
   items: RecItem[];
   note: string;
+  inventory_basis?: string;
+  donations?: { units: number; kg_assumed: number; co2e_kg: number; meals: number };
 }
 
 export interface LiveWeatherDay extends WeatherFeatures {

@@ -6,10 +6,12 @@ import Today from "./screens/Today";
 import ModelHealth from "./screens/ModelHealth";
 import LearningLoop from "./screens/LearningLoop";
 import Ledger from "./screens/Ledger";
+import Impact from "./screens/Impact";
 
-type Route = "today" | "health" | "loop" | "ledger";
+type Route = "today" | "impact" | "health" | "loop" | "ledger";
 const ROUTES: { id: Route; label: string; hint: string }[] = [
   { id: "today", label: "Today's plan", hint: "Orders, waste risk, markdowns" },
+  { id: "impact", label: "Impact", hint: "Waste, CO₂e and meals avoided" },
   { id: "health", label: "Model health", hint: "Accuracy, baselines, data sources" },
   { id: "loop", label: "Learning loop", hint: "Backtest replay, promotions" },
   { id: "ledger", label: "Ledger", hint: "Every prediction vs. outcome" },
@@ -103,6 +105,7 @@ export default function App() {
             </div>
           )}
           {route === "today" && <Today stores={storeList} store={store} setStore={setStore} />}
+          {route === "impact" && <Impact />}
           {route === "health" && <ModelHealth stores={storeList} store={store} setStore={setStore} meta={meta.data} />}
           {route === "loop" && <LearningLoop meta={meta.data} />}
           {route === "ledger" && <Ledger stores={storeList} />}

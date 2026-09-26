@@ -31,7 +31,9 @@ class Settings(BaseSettings):
 
     # Inventory simulator / decisions
     shelf_life_days: dict[str, int] = {"Fruit and vegetable": 3, "Bakery": 2, "Meat and fish": 4}
-    default_waste_cost_ratio: float = 0.5  # waste cost per unit as a fraction of price
+    # waste cost per unit as a fraction of price. 0.1 → critical ratio 0.75: the operating point where
+    # both policies keep lost sales near 5% (policy_study.json); 0.5 ran the store at ~13% stockouts.
+    default_waste_cost_ratio: float = 0.1
 
     # Open-Meteo
     open_meteo_timeout_s: float = 60.0

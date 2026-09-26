@@ -31,9 +31,30 @@ def save(version: str, booster: xgb.Booster, meta: dict, extra_models: dict[str,
     booster.save_model(path / "model.ubj")
     for name, m in (extra_models or {}).items():
         m.save_model(path / f"{name}.ubj")
-    meta = {**meta, "version": version, "created_at": datetime.now(timezone.utc).isoformat()}
+    meta = {**meta, "version": version, "created_at": datetime.now(timezone.utc).isoformat(),
+            "feature_importance": importance(booster)}
     (path / "meta.json").write_text(json.dumps(meta, indent=2, default=str))
     return path
+
+
+def importance(booster: xgb.Booster, top: int = 20) -> list[dict]:
+    """Share of total gain per feature — stored with the version so serving never needs the binary."""
+    gain = booster.get_score(importance_type="total_gain")
+    total = sum(gain.values()) or 1.0
+    return [{"feature": k, "share": g / total} for k, g in sorted(gain.items(), key=lambda kv: -kv[1])[:top]]
+
+
+def backfill_importance() -> int:
+    n = 0
+    for p in models_dir().glob("*_v*"):
+        meta = json.loads((p / "meta.json").read_text())
+        if "feature_importance" not in meta and (p / "model.ubj").exists():
+            b = xgb.Booster()
+            b.load_model(p / "model.ubj")
+            meta["feature_importance"] = importance(b)
+            (p / "meta.json").write_text(json.dumps(meta, indent=2, default=str))
+            n += 1
+    return n
 
 
 def load(version: str) -> tuple[xgb.Booster, dict, dict[str, xgb.Booster]]:

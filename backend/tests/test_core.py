@@ -134,3 +134,19 @@ def test_promotion_rejected_when_one_week_is_lost():
     assert d == "rejected" and "week" in reason
     d, _, _ = decide(champ, good, base, {"wape": 0.15}, halves=[(0.21, 0.19), (0.19, 0.17)])
     assert d == "promoted"
+
+
+def test_surplus_ladder_prefers_selling_then_markdown_then_donation():
+    from forecaster.decisions.impact import ladder
+    assert ladder(0, 20, None, 0)["action"] == "sell"
+    assert ladder(5, 20, 30, 0.3) == {"action": "markdown", "donate_units": 0.0}  # +10 demand clears 5
+    r = ladder(15, 20, 30, 0.3)
+    assert r["action"] == "markdown_then_donate" and r["donate_units"] == 5
+    assert ladder(4, 20, None, 0)["action"] == "donate"
+
+
+def test_impact_uses_cited_factors():
+    from forecaster.decisions.impact import CO2E_KG_PER_KG, KG_PER_MEAL, units_to_impact
+    assert 2.6 < CO2E_KG_PER_KG < 2.7 and 0.5 < KG_PER_MEAL < 0.6  # WRAP 16/6.0; ReFED ≈1.22 lb/meal
+    out = units_to_impact({"Bakery": 100.0})  # 100 × 0.1 kg assumed
+    assert out["kg_assumed"] == pytest.approx(10.0) and out["co2e_kg"] == pytest.approx(10 * CO2E_KG_PER_KG)

@@ -9,7 +9,8 @@ RUN npm run build
 FROM python:3.13-slim
 WORKDIR /app
 COPY backend/requirements.txt backend/requirements.txt
-RUN pip install --no-cache-dir -r backend/requirements.txt
+# xgboost-cpu: same package without the CUDA/NCCL libraries (the server does not train)
+RUN sed -i "s/^xgboost/xgboost-cpu/" backend/requirements.txt && pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ backend/
 COPY --from=web /web/dist frontend/dist
 # Pipeline outputs (models, ledger DB, recommendations) are produced locally and shipped as data.

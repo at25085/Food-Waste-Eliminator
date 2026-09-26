@@ -4,14 +4,16 @@
 loaded, replay speed set to fast, audio on if ElevenLabs is configured. Have the Model Health tab
 one click away.
 
-## 0:00 — The problem (15 s)
-"Grocers throw away fresh food every day because they order on gut feel or 'same as last week'.
-Forecasting startups sell predictions — but a prediction you can't audit is just a guess with a
-dashboard. NAME forecasts tomorrow, tells the manager what to order and mark down, and proves
-whether it was right."
+## 0:00 — The problem (15 s)  · track: A Marina's Mission
+"About a third of our food is never eaten, and fresh food thrown away by stores carries its whole
+footprint to the landfill. Stores still order on gut feel or 'same as last week'. NAME prevents
+that waste at the source — it forecasts tomorrow, orders the right amount, marks down or donates
+what's left — and proves every forecast was right before it's trusted."
 
 ## 0:15 — Today (40 s)
-- Point at the plan: tomorrow's forecast per product, order quantity, waste-risk badges, markdowns.
+- Point at the plan: tomorrow's forecast per product, order quantity, waste-risk badges, and the
+  surplus plan per item (sells through → markdown → donate, the EPA Wasted Food Scale). The donate
+  banner shows the meals and CO2e that would otherwise be landfilled.
 - Drag the **waste vs. stockout slider** → order quantities move live. "The manager chooses the
   trade-off; the math is a newsvendor on our P50/P80 forecasts, net of stock already on the shelf."
 - Play the **morning briefing** (Gemini writes it from the computed plan; it's never allowed to add
@@ -29,6 +31,11 @@ that was actually issued the day before."
   "newer isn't automatically better."
 - Easter: "Monitoring caught a pre-holiday under-forecast. We added holiday-proximity features; the
   new version had to earn promotion — pre-Easter error went from 22% to 18%."
+
+## 1:40 — Impact (15 s)
+Open **Impact**: per store per year, the waste avoided vs. "same as last week" ordering, in kg,
+CO2e and meals — with the cited factors and the labeled unit-weight assumptions right below.
+"And it doesn't cut waste by ordering less: it also has fewer empty shelves."
 
 ## 1:55 — Honesty & numbers (25 s)
 - Model Health: **14.3% weighted error vs 24.2% for same-weekday-last-week** (about 41% less error),

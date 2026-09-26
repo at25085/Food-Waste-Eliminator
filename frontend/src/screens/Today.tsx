@@ -174,7 +174,17 @@ export default function Today(props: { stores: Store[]; store: string | null; se
       <p className="honesty">
         <span className="honesty__tag">Read this first</span>
         Inventory &amp; waste are simulated; forecasts are real model output.
+        {data?.inventory_basis && <> {data.inventory_basis}</>}
       </p>
+
+      {data?.donations && data.donations.units > 0 && (
+        <p className="honesty">
+          <span className="honesty__tag">Donate</span>
+          {int(data.donations.units)} last-day units won't clear even after markdown — route them to a food-recovery
+          partner: about {int(data.donations.meals)} meals' worth, {num(data.donations.co2e_kg, 0)} kg CO₂e kept out of
+          landfill (assumed unit weights; see Impact).
+        </p>
+      )}
 
       {store && <Briefing store={store} />}
       {store && <ManagerNotes store={store} />}
@@ -382,6 +392,7 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                   {header("risk", "Waste risk", "")}
                   {header("markdown", "Markdown", "")}
                   {header("lift", "Est. lift at suggested markdown")}
+                  <th>Surplus plan</th>
                 </tr>
               </thead>
               <tbody>
@@ -426,8 +437,13 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                           ))}
                       </td>
                       <td className={`num ${i.markdown > 0 ? "" : "muted"}`} title={i.markdown > 0 ? `Model-estimated demand change at ${Math.round(i.markdown * 100)}% off` : undefined}>
-                        {i.markdown > 0 ? `${spct(i.markdown_lift_estimate, 0)} @ ${Math.round(i.markdown * 100)}%` : "—"}
+                        {i.markdown > 0
+                          ? (i.markdown_lift_estimate ?? 0) > 0
+                            ? `${spct(i.markdown_lift_estimate, 0)} @ ${Math.round(i.markdown * 100)}%`
+                            : `no lift found @ ${Math.round(i.markdown * 100)}%`
+                          : "—"}
                       </td>
+                      <td className="muted">{SURPLUS_LABEL[i.surplus_action ?? "sell"]}{(i.donate_units ?? 0) > 0 ? ` (${num(i.donate_units, 0)})` : ""}</td>
                     </tr>
                   );
                 })}
@@ -621,3 +637,10 @@ function ManagerNotes({ store }: { store: string }) {
     </Panel>
   );
 }
+
+const SURPLUS_LABEL: Record<string, string> = {
+  sell: "Sells through",
+  markdown: "Markdown clears it",
+  markdown_then_donate: "Markdown, then donate",
+  donate: "Donate",
+};

@@ -37,6 +37,7 @@ from forecaster.seed import excluded_days, seed_anomaly_days, seed_stores
 from forecaster.weather import open_meteo as om
 
 HOLDOUT_DAYS = 28
+LEGACY_SERVICE_LEVEL = 0.9  # assumed legacy ordering target
 MARKDOWN_LEVELS = (0.2, 0.3, 0.35, 0.45, 0.5, 0.6)  # every depth markdown_suggestion can return
 TRAIN_START = pd.Timestamp("2022-01-01")
 
@@ -165,12 +166,16 @@ def main() -> None:
         cf["discount_max"], cf["any_discount"], cf["n_discount_types"] = d, 1, 1
         nf[f"p50_if_markdown_{int(d * 100)}"] = cand.predict(cf)
 
-    # Inventory state entering tomorrow: simulate the model policy over the holdout window.
-    ratio = critical_ratio(settings.default_waste_cost_ratio)
+    # Inventory entering tomorrow = what the store's LEGACY practice leaves on the shelf (the
+    # situation on install day): order same-weekday-last-week sales plus a 90% service-level
+    # buffer (z90 x trailing 7-day std), through the same FIFO shelf. Labeled in the UI.
+    z80 = 0.8416
     inv_rows = []
     for (st, pid), g in hold.sort_values("date").groupby(["store_id", "product_id"], observed=True):
         life = settings.shelf_life_days.get(str(g["category"].iloc[0]), 3)
-        _, shelf = simulate_policy(g["sales"].to_numpy(), g["pred"].to_numpy(), g["p80"].to_numpy(), ratio, life)
+        legacy50 = g["seasonal_naive_7"].fillna(g["pred"]).to_numpy()
+        legacy80 = legacy50 + z80 * g["sales_roll_7_std"].fillna(0).to_numpy()
+        _, shelf = simulate_policy(g["sales"].to_numpy(), legacy50, legacy80, LEGACY_SERVICE_LEVEL, life)
         inv_rows.append({"store_id": str(st), "product_id": str(pid), "on_hand": shelf.sellable_next_day(),
                          "expiring_tomorrow": shelf.expiring_next_day(), "shelf_life": life})
     inv = pd.DataFrame(inv_rows)

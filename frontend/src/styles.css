@@ -856,9 +856,8 @@ input[type="search"] {
 /* ---------- Today ---------- */
 .honesty {
   margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  display: block; /* long, mixed text must wrap rather than overflow the flex row */
+  line-height: 1.5;
   font-weight: 600;
   color: var(--ink);
   background: var(--surface);
@@ -868,6 +867,8 @@ input[type="search"] {
   padding: 8px 12px;
 }
 .honesty__tag {
+  display: inline-block;
+  margin-right: 10px;
   font-size: 12px;
   font-weight: 700;
   font-stretch: 85%;
@@ -1945,4 +1946,31 @@ input[type="search"] {
   border-radius: var(--radius);
   padding: 7px 10px;
   font: inherit;
+}
+
+.impact {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.impact__value {
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.impact__label {
+  font-size: 13px;
+  opacity: 0.75;
+}
+.impact__lead {
+  font-size: 16px;
+  line-height: 1.5;
+  margin-top: 0;
+}
+.sources {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
 }

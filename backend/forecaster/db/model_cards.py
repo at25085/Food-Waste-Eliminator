@@ -25,9 +25,12 @@ def _jsonable(v):
     return json.loads(json.dumps(v, default=lambda o: o.isoformat() if isinstance(o, (date, datetime)) else str(o)))
 
 
-def build_cards(engine) -> list[dict]:
+def build_cards(engine, only: str | None = None) -> list[dict]:
     with engine.connect() as conn:
-        versions = [dict(r._mapping) for r in conn.execute(select(S.model_versions))]
+        q = select(S.model_versions)
+        if only:
+            q = q.where(S.model_versions.c.version == only)
+        versions = [dict(r._mapping) for r in conn.execute(q)]
         runs = {r.candidate_version: dict(r._mapping) for r in conn.execute(select(S.retrain_runs))
                 if r.candidate_version}
         history = [dict(r._mapping) for r in conn.execute(select(S.champion_history))]
@@ -35,8 +38,8 @@ def build_cards(engine) -> list[dict]:
     for v in versions:
         path = registry.models_dir() / v["version"]
         meta = json.loads((path / "meta.json").read_text()) if (path / "meta.json").exists() else {}
-        importance = []
-        if (path / "model.ubj").exists():
+        importance = meta.get("feature_importance", [])
+        if not importance and (path / "model.ubj").exists():
             b = xgb.Booster()
             b.load_model(path / "model.ubj")
             gain = b.get_score(importance_type="total_gain")

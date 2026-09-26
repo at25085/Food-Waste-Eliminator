@@ -19,6 +19,7 @@ from forecaster.data.validation import validate_traffic
 from forecaster.db import schema as S
 from forecaster.db.schema import create_all, get_engine
 from forecaster.features.build import FEATURE_SCHEMA_VERSION
+from forecaster.decisions import impact
 from forecaster.decisions.policy import critical_ratio, markdown_suggestion, order_quantity
 from forecaster.models.metrics import summarize
 from forecaster.seed import seed_stores
@@ -276,6 +277,11 @@ def recommendations(store_id: str, waste_cost_ratio: float = Query(default=None,
         if m > 0 and f"p50_if_markdown_{int(round(m * 100))}" in rec.columns else None
         for m, (_, r) in zip(rec["markdown"], rec.iterrows())]
     rec["waste_risk"] = np.where(rec["excess_ratio"] > 0.1, "high", np.where(rec["expiring_leftover"] > 0, "watch", "low"))
+    steps = [impact.ladder(r["expiring_leftover"], r["p50"],
+                           r.get(f"p50_if_markdown_{int(round(r['markdown'] * 100))}") if r["markdown"] > 0 else None,
+                           r["markdown"]) for _, r in rec.iterrows()]
+    rec["surplus_action"] = [x["action"] for x in steps]
+    rec["donate_units"] = [x["donate_units"] for x in steps]
     rec["_risk_rank"] = rec["waste_risk"].map({"high": 0, "watch": 1, "low": 2})
     rec = rec.sort_values(["_risk_rank", "expiring_leftover"], ascending=[True, False]).drop(columns="_risk_rank")
     head = rec.iloc[0] if len(rec) else None
@@ -288,6 +294,9 @@ def recommendations(store_id: str, waste_cost_ratio: float = Query(default=None,
         "expected_customers": None if head is None or pd.isna(head["expected_customer_count"]) else float(head["expected_customer_count"]),
         "items": rec.replace({np.nan: None}).to_dict("records"),
         "note": "Inventory and waste are simulated (FIFO shelf-life simulator); forecasts are real model output.",
+        "inventory_basis": "Stock entering tomorrow is simulated from the store's legacy practice "
+                           "(same weekday last week + a 90% service-level buffer) — the situation on install day.",
+        "donations": impact.units_to_impact(rec.groupby("category")["donate_units"].sum().to_dict()),
     }
 
 
@@ -343,7 +352,7 @@ def model_card(version: str):
         doc = coll.find_one({"_id": version})
         if doc:
             return {**doc, "source": "mongodb_atlas"}
-    for c in model_cards.build_cards(engine):
+    for c in model_cards.build_cards(engine, only=version):
         if c["_id"] == version:
             return {**c, "source": "local"}
     raise HTTPException(404, "unknown version")
@@ -397,6 +406,26 @@ def live_weather(store_id: str):
     df["date"] = df["date"].dt.strftime("%Y-%m-%d")
     return {"store_id": store_id, "city": loc["city"], "fetched_at": datetime.now(timezone.utc).isoformat(),
             "days": df.replace({np.nan: None}).to_dict("records")}
+
+
+@app.get("/api/impact")
+def impact_summary():
+    """Social-good impact of the model's ordering vs. naive ordering over the production holdout
+    (simulated waste), converted with cited factors and labeled assumptions."""
+    rep = _read_json("production_report.json")
+    by_cat = {r["category"]: r for r in rep["simulation"]["by_category"]}
+    avoided = {c: max(r["baseline_waste"] - r["model_waste"], 0.0) for c, r in by_cat.items()}
+    days = (pd.Timestamp(rep["holdout"][1]) - pd.Timestamp(rep["holdout"][0])).days + 1
+    stores = len(STORE_LOCATIONS)
+    out = impact.units_to_impact(avoided)
+    rec_path = settings.artifacts_dir / "recommendations.parquet"
+    products_per_store = round(len(pd.read_parquet(rec_path, columns=["store_id"])) / stores) if rec_path.exists() else None
+    return {"holdout": rep["holdout"], "days": days, "stores": stores, "products_per_store": products_per_store,
+            "scope": f"Covers the ~{products_per_store} sampled fresh products per store, not the whole assortment.",
+            "waste_avoided": out,
+            "per_store_per_year": {k: (v / days * 365 / stores if isinstance(v, (int, float)) else v) for k, v in out.items()},
+            "lost_sales": {"model": rep["simulation"]["totals"]["model_lost"], "naive": rep["simulation"]["totals"]["baseline_lost"]},
+            "sources": impact.sources(), "label": rep["simulation"]["label"]}
 
 
 @app.get("/api/replay/summary")
