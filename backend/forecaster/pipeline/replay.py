@@ -97,6 +97,8 @@ def run(feat: pd.DataFrame, engine, context: str = "replay", log=print) -> dict:
 
     summary = {"context": context, "replay_start": str(REPLAY_START.date()), "replay_end": str(end.date()),
                "timeline": timeline, "decisions": decisions, "final_champion": champion["version"]}
+    from forecaster.db import hooks
+    hooks.after_everything(engine)
     out = settings.artifacts_dir / f"{context}_summary.json"
     out.write_text(json.dumps(summary, indent=2, default=str))
     return summary

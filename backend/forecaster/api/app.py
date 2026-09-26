@@ -15,6 +15,7 @@ from sqlalchemy import func, insert, select, update
 
 from forecaster import briefing, memory
 from forecaster.data import uploads
+from forecaster.db import hooks, timescale
 from forecaster.pipeline import store_learning
 from forecaster.config import STORE_LOCATIONS, settings
 from forecaster.data.validation import validate_traffic
@@ -32,6 +33,9 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 engine = get_engine()
 create_all(engine)
 seed_stores(engine)
+_TIMESCALE = timescale.enabled(engine)
+if _TIMESCALE:
+    timescale.sync_safe(engine)  # catch up on anything graded while the app was down
 
 
 def _read_json(name: str) -> dict:
@@ -200,6 +204,7 @@ def rollback(version: str, context: str = "production"):
         conn.execute(insert(S.champion_history).values(context=context, version=version,
                                                        effective_at=datetime.now(timezone.utc),
                                                        reason=f"manual rollback from {current}"))
+    hooks.after_models(engine)
     return {"champion": version, "changed": True, "previous": current}
 
 
@@ -234,15 +239,24 @@ def metrics(context: str = "replay", window: int = 30, by: str = "global", store
 
 @app.get("/api/metrics/timeseries")
 def metrics_timeseries(context: str = "replay", store: str | None = None):
-    """Daily WAPE / bias, rolling 7/30-day WAPE, the version serving each day and drift flags."""
-    df = _ledger(context, store).dropna(subset=["actual_units_sold"])
-    if df.empty:
-        return {"days": [], "reference_wape": None}
-    df["abs_err"] = (df["predicted_units"] - df["actual_units_sold"]).abs()
-    df["err"] = df["predicted_units"] - df["actual_units_sold"]
-    d = df.groupby("forecast_date").agg(abs_err=("abs_err", "sum"), err=("err", "sum"),
-                                        actual=("actual_units_sold", "sum"),
-                                        version=("model_version", "first")).reset_index()
+    """Daily WAPE / bias, rolling 7/30-day WAPE, the version serving each day and drift flags.
+    On TimescaleDB the daily totals come from the `daily_forecast_error` continuous aggregate."""
+    source = "ledger"
+    d = pd.DataFrame()
+    if _TIMESCALE:
+        d = timescale.daily_series(engine, context, store)
+        source = "timescale continuous aggregate"
+    if d.empty:
+        df = _ledger(context, store).dropna(subset=["actual_units_sold"])
+        if df.empty:
+            return {"days": [], "reference_wape": None, "source": source}
+        df["abs_err"] = (df["predicted_units"] - df["actual_units_sold"]).abs()
+        df["err"] = df["predicted_units"] - df["actual_units_sold"]
+        d = df.groupby("forecast_date").agg(abs_err=("abs_err", "sum"), err=("err", "sum"),
+                                            actual=("actual_units_sold", "sum"),
+                                            version=("model_version", "first")).reset_index()
+        source = "ledger"
+    d["forecast_date"] = pd.to_datetime(d["forecast_date"])
     d["wape"] = d["abs_err"] / d["actual"]
     d["bias"] = d["err"] / d["actual"]
     for w in (7, 30):
@@ -251,7 +265,7 @@ def metrics_timeseries(context: str = "replay", store: str | None = None):
     d["drift"] = (d["wape_30d"] > ref * settings.drift_wape_multiplier)
     d["forecast_date"] = d["forecast_date"].dt.strftime("%Y-%m-%d")
     return {"days": d.replace({np.nan: None}).to_dict("records"), "reference_wape": ref,
-            "drift_multiplier": settings.drift_wape_multiplier}
+            "drift_multiplier": settings.drift_wape_multiplier, "source": source}
 
 
 @app.get("/api/ledger")
@@ -520,6 +534,7 @@ async def upload_sheet(store_id: str, file: UploadFile = File(...)):
         result["evaluation"] = store_learning.evaluate_uploaded_days(engine, store_id, result["upload_id"])
         plan = store_learning.forecast_next_day(engine, store_id)
         result["next_forecast_date"] = plan["forecast_date"].iloc[0] if len(plan) else None
+    hooks.after_outcomes(engine)
     _LEDGER_CACHE.clear()
     _BRIEFING_CACHE.pop(store_id, None)
     result["learning"] = store_learning.status(engine, store_id)
@@ -613,6 +628,7 @@ def retrain(store_id: str, background: BackgroundTasks):
     def run():
         try:
             out = store_learning.retrain_store(engine, store_id)  # re-plans every store if promoted
+            hooks.after_everything(engine)
             _LEDGER_CACHE.clear()
             _BRIEFING_CACHE.clear()
             _RETRAIN_JOBS[store_id] = {"state": "done", **out}
@@ -829,6 +845,9 @@ def post_outcomes(rows: list[OutcomeRow]):
                 continue
             conn.execute(insert(S.outcomes).values(**r.model_dump(), observed_at=now))
             accepted += 1
+    if accepted:
+        hooks.after_outcomes(engine)
+        _LEDGER_CACHE.clear()
     return {"accepted": accepted, "rejected": rejected}
 
 

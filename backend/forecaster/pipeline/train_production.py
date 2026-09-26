@@ -255,6 +255,8 @@ def main() -> None:
               "simulation": sim_summary, "weather_cross_check": xcheck,
               "feature_importance": _importance(cand.booster)}
     (settings.artifacts_dir / "production_report.json").write_text(json.dumps(report, indent=2, default=str))
+    from forecaster.db import hooks
+    hooks.after_everything(engine)
     log(f"done: {version}, {len(rec)} next-day recommendations for {tomorrow.date()}")
 
 

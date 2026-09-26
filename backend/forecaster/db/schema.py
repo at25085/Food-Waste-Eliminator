@@ -220,3 +220,11 @@ def create_all(engine: Engine) -> None:
                         log.warning("%s stays a plain Postgres table: %s", table, TIMESCALE_STATUS["not_converted"][table])
                 existing = conn.execute(text("SELECT hypertable_name FROM timescaledb_information.hypertables")).scalars().all()
                 TIMESCALE_STATUS["hypertables"] = sorted(set(existing))
+        if TIMESCALE_STATUS["extension"]:  # forecast-error hypertable + continuous aggregate
+            from forecaster.db import timescale
+            timescale.ensure(engine)
+            with engine.connect() as conn:
+                TIMESCALE_STATUS["hypertables"] = sorted(set(conn.execute(text(
+                    "SELECT hypertable_name FROM timescaledb_information.hypertables")).scalars().all()))
+                TIMESCALE_STATUS["continuous_aggregates"] = sorted(conn.execute(text(
+                    "SELECT view_name FROM timescaledb_information.continuous_aggregates")).scalars().all())
