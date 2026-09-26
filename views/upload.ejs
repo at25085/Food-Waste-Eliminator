@@ -22,7 +22,7 @@
         </nav>
     </header>
 
-    <main class="p-8 max-w-4xl mx-auto space-y-6">
+    <main class="p-8 max-w-4xl mx-auto flex flex-col gap-6">
         
         <!-- Header Section -->
         <div class="bg-white p-6 rounded-xl shadow-sm slide-up" style="animation-delay: 0.2s;">
@@ -56,7 +56,6 @@
         <!-- Recent Uploads Dummy List -->
         <div class="bg-white p-6 rounded-xl shadow-sm slide-up" style="animation-delay: 0.4s;">
             <h3 class="text-lg font-bold mb-4 text-gray-700 border-b pb-2">Recent Uploads</h3>
-            <!-- Added ID to the ul list so we can target it in Javascript -->
             <ul id="recent-uploads-list" class="space-y-3">
                 <li class="flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-100">
                     <div class="flex items-center space-x-3">
@@ -111,18 +110,14 @@
         // Function to show UI feedback once files are selected/dropped
         function handleFiles(files) {
             if (files.length > 0) {
-                // 1. Get the names of the files
                 const fileNames = Array.from(files).map(file => file.name).join(', ');
                 
-                // 2. Show success message
                 fileFeedback.innerHTML = `Successfully uploaded: <strong>${fileNames}</strong>. Redirecting to dashboard...`;
                 fileFeedback.classList.remove('hidden');
                 
-                // 3. Format the current time (e.g., "9:00 AM")
                 const now = new Date();
                 const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 
-                // 4. Create a new list item and style it slightly differently (light green background) to show it's new
                 const newListItem = document.createElement('li');
                 newListItem.className = "flex justify-between items-center p-3 bg-green-50 rounded-lg border border-green-200 slide-up";
                 newListItem.innerHTML = `
@@ -133,13 +128,11 @@
                     <span class="text-sm text-gray-500">Today at ${timeString}</span>
                 `;
                 
-                // 5. Add the new item to the top of the "Recent Uploads" list
                 recentUploadsList.insertBefore(newListItem, recentUploadsList.firstChild);
                 
-                // 6. Redirect to the dashboard page after 2 seconds (2000 milliseconds)
                 setTimeout(() => {
                     window.location.href = '/?uploaded=true';
-                }, 4000);
+                }, 6000);
             }
         }
     </script>

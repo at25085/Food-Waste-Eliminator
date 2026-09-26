@@ -1,17 +1,58 @@
 document.addEventListener('DOMContentLoaded', () => {
-    
-    // Data for grocery categories (Used in both the Bar Chart and the Order List)
-    const categoryData = [
-        { item: 'Apples', amount: 450, color: '#ef4444' },   
-        { item: 'Carrots', amount: 290, color: '#f97316' },  
-        { item: 'Bananas', amount: 380, color: '#eab308' },   
-        { item: 'Spinach', amount: 150, color: '#22c55e' },   
-        { item: 'Blueberries', amount: 210, color: '#0062ff' },  
-    ];
+    // 1. Define Default & Updated Datasets for the Demo
+    const defaultData = {
+        customers: '1,248',
+        sales: '$42.5k',
+        waste: '340 lbs',
+        items: '8,932',
+        categories: [
+            { item: 'Apples', amount: 450, color: '#ef4444', price: 0.50 },   
+            { item: 'Carrots', amount: 290, color: '#f97316', price: 0.75 },  
+            { item: 'Bananas', amount: 380, color: '#eab308', price: 0.25 },   
+            { item: 'Spinach', amount: 150, color: '#22c55e', price: 1.20 },   
+            { item: 'Blueberries', amount: 210, color: '#2563eb', price: 2.50 }
+        ],
+        projectedSales: [4100, 4300, 3900, 4600, 5200, 6800, 7100]
+    };
 
-    // 1. Populate the "What to Order" list dynamically to match the data above
+    const uploadedData = {
+        customers: '1,890',
+        sales: '$58.2k',
+        waste: '512 lbs',
+        items: '12,410',
+        categories: [
+            { item: 'Avocados', amount: 620, color: '#15803d', price: 1.50 },   
+            { item: 'Strawberries', amount: 510, color: '#dc2626', price: 3.00 },  
+            { item: 'Almond Milk', amount: 390, color: '#d97706', price: 2.80 },   
+            { item: 'Artisan Bread', amount: 310, color: '#854d0e', price: 3.50 },   
+            { item: 'Fresh Eggs', amount: 440, color: '#f59e0b', price: 2.20 }
+        ],
+        projectedSales: [5200, 5600, 5100, 6100, 7400, 8900, 9300]
+    };
+
+    // 2. Check URL for '?uploaded=true'
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasUploaded = urlParams.get('uploaded') === 'true';
+
+    // Select active dataset
+    const activeData = hasUploaded ? uploadedData : defaultData;
+
+    // 3. Display Banner & Update Metric Cards
+    if (hasUploaded) {
+        const banner = document.getElementById('upload-success-banner');
+        if (banner) banner.classList.remove('hidden');
+    }
+
+    document.getElementById('metric-customers').textContent = activeData.customers;
+    document.getElementById('metric-sales').textContent = activeData.sales;
+    document.getElementById('metric-waste').textContent = activeData.waste;
+    document.getElementById('metric-items').textContent = activeData.items;
+
+    // 4. Populate "What to Order" List
     const orderList = document.getElementById('order-list');
-    categoryData.forEach(data => {
+    orderList.innerHTML = ''; // Clear previous items
+    
+    activeData.categories.forEach(data => {
         const li = document.createElement('li');
         li.className = "flex justify-between items-center p-3 hover:bg-gray-50 rounded-lg border border-gray-100 transition";
         li.innerHTML = `
@@ -24,32 +65,28 @@ document.addEventListener('DOMContentLoaded', () => {
         orderList.appendChild(li);
     });
 
-    // 2. Initialize Bar Chart (Sales per Category)
+    // 5. Initialize Bar Chart (Sales per Category)
     const ctxCategory = document.getElementById('categoryChart').getContext('2d');
     new Chart(ctxCategory, {
         type: 'bar',
         data: {
-            labels: categoryData.map(d => d.item),
+            labels: activeData.categories.map(d => d.item),
             datasets: [{
                 label: 'Units Sold',
-                data: categoryData.map(d => d.amount),
-                backgroundColor: categoryData.map(d => d.color),
+                data: activeData.categories.map(d => d.amount),
+                backgroundColor: activeData.categories.map(d => d.color),
                 borderRadius: 4,
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
-            },
-            scales: {
-                y: { beginAtZero: true }
-            }
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true } }
         }
     });
 
-    // 3. Initialize Line Chart (Projected Sales in Days of the Week)
+    // 6. Initialize Line Chart (Projected Sales)
     const ctxProjected = document.getElementById('projectedChart').getContext('2d');
     new Chart(ctxProjected, {
         type: 'line',
@@ -57,76 +94,60 @@ document.addEventListener('DOMContentLoaded', () => {
             labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
             datasets: [{
                 label: 'Projected Sales ($)',
-                data: [4100, 4300, 3900, 4600, 5200, 6800, 7100],
-                borderColor: '#3b82f6', // Blue
+                data: activeData.projectedSales,
+                borderColor: '#3b82f6',
                 backgroundColor: 'rgba(59, 130, 246, 0.1)',
                 borderWidth: 3,
-                tension: 0.4, // Makes the line curved/smooth
+                tension: 0.4,
                 fill: true
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
-            },
-            scales: {
-                y: { beginAtZero: false }
-            }
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: false } }
         }
     });
 
-// 4. Generate Order Report (CSV Export)
+    // 7. Generate Order Report (CSV Export)
     const generateBtn = document.getElementById('generate-report-btn');
-    
-    generateBtn.addEventListener('click', () => {
-        // Industry standard PO format fields
-        const headers = ['PO Number', 'Issue Date', 'SKU', 'Item Description', 'Order Quantity', 'Est. Unit Price', 'Total Cost'];
-        const date = new Date().toISOString().split('T')[0];
-        const poNumber = `PO-${date.replace(/-/g, '')}-${Math.floor(Math.random() * 1000)}`;
-        
-        // Mock pricing matching your categoryData items
-        const priceMap = { 
-            'Apples': 0.50, 
-            'Carrots': 0.75, 
-            'Bananas': 0.25, 
-            'Spinach': 1.20, 
-            'Blueberries': 2.50 
-        };
-        
-        let csvContent = headers.join(',') + '\n';
-        
-        // Generate rows based on the existing categoryData array
-        categoryData.forEach((data, index) => {
-            const sku = `SKU-100${index + 1}`;
-            // Use priceMap value, or fallback to $1.00 if the item is missing
-            const unitPrice = priceMap[data.item] !== undefined ? priceMap[data.item] : 1.00;
-            const totalCost = (data.amount * unitPrice).toFixed(2);
+    if (generateBtn) {
+        generateBtn.addEventListener('click', () => {
+            const headers = ['PO Number', 'Issue Date', 'SKU', 'Item Description', 'Order Quantity', 'Est. Unit Price', 'Total Cost'];
+            const date = new Date().toISOString().split('T')[0];
+            const poNumber = `PO-${date.replace(/-/g, '')}-${Math.floor(Math.random() * 1000)}`;
             
-            const row = [
-                poNumber, 
-                date, 
-                sku, 
-                data.item, 
-                data.amount, 
-                `$${unitPrice.toFixed(2)}`, 
-                `$${totalCost}`
-            ];
-            csvContent += row.join(',') + '\n';
-        });
+            let csvContent = headers.join(',') + '\n';
+            
+            activeData.categories.forEach((data, index) => {
+                const sku = `SKU-100${index + 1}`;
+                const unitPrice = data.price;
+                const totalCost = (data.amount * unitPrice).toFixed(2);
+                
+                const row = [
+                    poNumber, 
+                    date, 
+                    sku, 
+                    data.item, 
+                    data.amount, 
+                    `$${unitPrice.toFixed(2)}`, 
+                    `$${totalCost}`
+                ];
+                csvContent += row.join(',') + '\n';
+            });
 
-        // Create a downloadable Blob
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        const url = URL.createObjectURL(blob);
-        
-        link.setAttribute('href', url);
-        link.setAttribute('download', `${poNumber}_Order_Report.csv`);
-        link.style.visibility = 'hidden';
-        
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    });
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            
+            link.setAttribute('href', url);
+            link.setAttribute('download', `${poNumber}_Order_Report.csv`);
+            link.style.visibility = 'hidden';
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+    }
 });
