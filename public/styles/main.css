@@ -1,23 +1,16 @@
-body {
-  font-family: sans-serif;
+.slide-up {
+    opacity: 0;
+    transform: translateY(30px);
+    animation: slideUpFade 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-.main-header {
-  background-color: #333;      
-  color: white;              
-  padding: 15px 30px;         
-  display: flex;              
-  justify-content: space-between; 
-  align-items: center;          
-}
-
-.nav-links a {
-  color: white;
-  text-decoration: none;      
-  margin-left: 20px;       
-  transition: color 0.3s;
-}
-
-.nav-links a:hover {
-  color: #1abc9c;             
+@keyframes slideUpFade {
+    0% {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }

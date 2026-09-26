@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload Data - Food Waster</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Keep the same animations -->
+    <link rel="stylesheet" href="/styles/main.css" />
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans">
+
+    <!-- Top Header -->
+    <header class="bg-white shadow-md p-4 flex justify-between items-center slide-up" style="animation-delay: 0.1s;">
+        <h1 class="text-2xl font-bold text-green-600">Food Waster</h1>
+        <nav class="space-x-6 font-semibold">
+            <a href="/" class="text-gray-500 hover:text-green-600 transition">Dashboard</a>
+            <!-- Upload is active here -->
+            <a href="/upload" class="text-green-600 border-b-2 border-green-600 pb-1">Upload</a>
+        </nav>
+    </header>
+
+    <main class="p-8 max-w-4xl mx-auto space-y-6">
+        
+        <!-- Header Section -->
+        <div class="bg-white p-6 rounded-xl shadow-sm slide-up" style="animation-delay: 0.2s;">
+            <h2 class="text-2xl font-bold text-gray-700">Upload Store Data</h2>
+            <p class="text-gray-500 mt-2">Upload your daily sales and inventory spreadsheets to generate accurate forecasts and minimize waste.</p>
+        </div>
+
+        <!-- Drag & Drop Zone -->
+        <div class="bg-white p-8 rounded-xl shadow-sm slide-up" style="animation-delay: 0.3s;">
+            <!-- The Drop Zone Container -->
+            <div id="drop-zone" class="border-4 border-dashed border-gray-300 rounded-xl p-16 flex flex-col items-center justify-center text-center cursor-pointer hover:border-green-500 hover:bg-green-50 transition-colors duration-300 bg-gray-50">
+                
+                <svg class="w-16 h-16 text-gray-400 mb-4 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                </svg>
+                
+                <h3 class="text-xl font-semibold text-gray-700 pointer-events-none">Drag and drop your files here</h3>
+                <p class="text-gray-500 mt-2 pointer-events-none">or <span class="text-green-600 font-medium underline">browse your files</span></p>
+                <p class="text-xs text-gray-400 mt-4 pointer-events-none">Supported formats: .CSV, .XLSX, .JSON (Max size: 50MB)</p>
+                
+                <!-- Hidden File Input for clicking -->
+                <input type="file" id="file-input" class="hidden" accept=".csv, .xlsx, .json" multiple>
+            </div>
+            
+            <!-- File preview text -->
+            <div id="file-feedback" class="hidden mt-4 p-4 bg-green-100 text-green-800 rounded-lg font-medium text-center">
+                <!-- Javascript will insert text here -->
+            </div>
+        </div>
+
+        <!-- Recent Uploads Dummy List -->
+        <div class="bg-white p-6 rounded-xl shadow-sm slide-up" style="animation-delay: 0.4s;">
+            <h3 class="text-lg font-bold mb-4 text-gray-700 border-b pb-2">Recent Uploads</h3>
+            <ul class="space-y-3">
+                <li class="flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-100">
+                    <div class="flex items-center space-x-3">
+                        <svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        <span class="font-medium text-gray-700">inventory_thursday.csv</span>
+                    </div>
+                    <span class="text-sm text-gray-500">Yesterday at 4:30 PM</span>
+                </li>
+            </ul>
+        </div>
+    </main>
+
+    <!-- JavaScript for Drag and Drop functionality -->
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const fileFeedback = document.getElementById('file-feedback');
+
+        // Trigger file input when clicking the drop zone
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        // Handle File Input (Clicking)
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        // Add dragover visual effect
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-green-500', 'bg-green-50');
+            dropZone.classList.remove('border-gray-300', 'bg-gray-50');
+        });
+
+        // Remove visual effect on drag leave
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-green-500', 'bg-green-50');
+            dropZone.classList.add('border-gray-300', 'bg-gray-50');
+        });
+
+        // Handle File Drop
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-green-500', 'bg-green-50');
+            dropZone.classList.add('border-gray-300', 'bg-gray-50');
+            
+            const files = e.dataTransfer.files;
+            handleFiles(files);
+        });
+
+        // Function to show UI feedback once files are selected/dropped
+        function handleFiles(files) {
+            if (files.length > 0) {
+                // Get just the names of the files
+                const fileNames = Array.from(files).map(file => file.name).join(', ');
+                fileFeedback.innerHTML = `Ready to upload: <strong>${fileNames}</strong>`;
+                fileFeedback.classList.remove('hidden');
+                
+                // Note: In a real app, you would use fetch() or FormData here to send 'files' to your Express server!
+            }
+        }
+    </script>
+</body>
+</html>
