@@ -8,3 +8,4 @@ artifacts/baseline_*
 # serving reads precomputed forecasts + meta.json (with feature importance); binaries stay local
 artifacts/models/**/*.ubj
 artifacts/holiday_*
+artifacts/

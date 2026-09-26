@@ -13,8 +13,9 @@ COPY backend/requirements.txt backend/requirements.txt
 RUN sed -i "s/^xgboost/xgboost-cpu/" backend/requirements.txt && pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ backend/
 COPY --from=web /web/dist frontend/dist
-# Pipeline outputs (models, ledger DB, recommendations) are produced locally and shipped as data.
-COPY artifacts/ artifacts/
+# Models, plans and training data are NOT baked in: they live on persistent volumes
+# (docker-compose.prod.yml) so uploads and live retrains survive restarts.
+RUN mkdir -p artifacts data/processed data/cache
 ENV PYTHONPATH=/app/backend
 EXPOSE 8000
 CMD ["python", "-m", "uvicorn", "forecaster.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
