@@ -8,23 +8,22 @@ from datetime import date, datetime, timezone
 
 import numpy as np
 import pandas as pd
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Query, Response, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import func, insert, select, update
 
-from forecaster import briefing, memory
+from forecaster import briefing, chat, memory
 from forecaster.data import uploads
 from forecaster.db import hooks, timescale
 from forecaster.pipeline import store_learning
-from forecaster.config import STORE_LOCATIONS, settings
+from forecaster.config import REPO_ROOT, STORE_LOCATIONS, settings
 from forecaster.data.validation import validate_traffic
 from forecaster.db import schema as S
 from forecaster.db.schema import create_all, get_engine
 from forecaster.features.build import FEATURE_SCHEMA_VERSION
 from forecaster.decisions import impact, markdown_plan
 from forecaster.decisions.policy import critical_ratio, order_quantity
-from forecaster.models.metrics import summarize
 from forecaster.seed import seed_stores
 from forecaster.weather import open_meteo as om
 
@@ -45,32 +44,64 @@ def _read_json(name: str) -> dict:
     return json.loads(p.read_text())
 
 
-_LEDGER_CACHE: dict[str, tuple[tuple, pd.DataFrame]] = {}
+# The ledger can hold hundreds of thousands of rows, and a hosted database may sit behind a slow
+# link: filter, limit and aggregate in SQL, never download a whole context to answer one request.
+_P, _O = S.predictions, S.outcomes
+_ERR = _P.c.predicted_units - _O.c.actual_units_sold
 
 
-def _ledger(context: str, store: str | None = None) -> pd.DataFrame:
-    """Predictions joined with outcomes. Cached per context and invalidated whenever the number of
-    predictions or outcomes changes (both tables are append-only, so counts are a valid version)."""
-    from sqlalchemy import func
-    with engine.connect() as conn:
-        stamp = (conn.execute(select(func.count()).select_from(S.predictions).where(S.predictions.c.context == context)).scalar(),
-                 conn.execute(select(func.count()).select_from(S.outcomes)).scalar())
-    hit = _LEDGER_CACHE.get(context)
-    if hit is None or hit[0] != stamp:
-        _LEDGER_CACHE[context] = (stamp, _load_ledger(context))
-    df = _LEDGER_CACHE[context][1]
-    return (df[df["store_id"] == store] if store else df).copy()
+def _ledger_filters(context: str, store: str | None = None, product: str | None = None) -> list:
+    f = [_P.c.context == context]
+    if store:
+        f.append(_P.c.store_id == store)
+    if product:
+        f.append(_P.c.product_id == product)
+    return f
 
 
-def _load_ledger(context: str) -> pd.DataFrame:
-    q = select(S.predictions, S.outcomes.c.actual_units_sold, S.outcomes.c.actual_customer_count,
-               S.outcomes.c.waste_units, S.outcomes.c.observed_at) \
-        .select_from(S.predictions.outerjoin(S.outcomes, S.predictions.c.prediction_id == S.outcomes.c.prediction_id)) \
-        .where(S.predictions.c.context == context)
+def _ledger_rows(context: str, store: str | None = None, product: str | None = None, limit: int | None = None,
+                 with_weather: bool = False) -> pd.DataFrame:
+    """Predictions joined with outcomes, newest first; the weather JSON only when asked for."""
+    cols = [c for c in _P.c if with_weather or c.name != "weather_forecast"]
+    q = (select(*cols, _O.c.actual_units_sold, _O.c.actual_customer_count, _O.c.waste_units, _O.c.observed_at)
+         .select_from(_P.outerjoin(_O, _P.c.prediction_id == _O.c.prediction_id))
+         .where(*_ledger_filters(context, store, product)).order_by(_P.c.forecast_date.desc()))
+    if limit:
+        q = q.limit(limit)
     with engine.connect() as conn:
         df = pd.read_sql(q, conn)
     df["forecast_date"] = pd.to_datetime(df["forecast_date"])
     return df
+
+
+def _error_totals(context: str, store: str | None = None, window: int | None = None, by=None) -> pd.DataFrame:
+    """Graded forecasts summed in SQL: n, sum |e|, sum e, sum e², sum actual (optionally per group and
+    over the last `window` graded days)."""
+    graded = _ledger_filters(context, store) + [_O.c.actual_units_sold.is_not(None)]
+    join = _P.join(_O, _P.c.prediction_id == _O.c.prediction_id)
+    if window:
+        with engine.connect() as conn:
+            end = conn.execute(select(func.max(_P.c.forecast_date)).select_from(join).where(*graded)).scalar()
+        if end is None:
+            return pd.DataFrame()
+        end = pd.Timestamp(end)
+        graded.append(_P.c.forecast_date > (end - pd.Timedelta(days=window)).date())
+    keys = [] if by is None else ([by] if not isinstance(by, list) else by)
+    q = (select(*keys, func.count().label("n"), func.sum(func.abs(_ERR)).label("abs_err"), func.sum(_ERR).label("err"),
+                func.sum(_ERR * _ERR).label("sq_err"), func.sum(_O.c.actual_units_sold).label("actual"))
+         .select_from(join).where(*graded))
+    if keys:
+        q = q.group_by(*keys)
+    with engine.connect() as conn:
+        return pd.read_sql(q, conn)
+
+
+def _summary(r) -> dict:
+    n, actual = int(r["n"] or 0), float(r["actual"] or 0)
+    if not n or not actual:
+        return {"n": n, "mae": None, "rmse": None, "wape": None, "bias": None}
+    return {"n": n, "mae": float(r["abs_err"]) / n, "rmse": float(np.sqrt(float(r["sq_err"]) / n)),
+            "wape": float(r["abs_err"]) / actual, "bias": float(r["err"]) / actual}
 
 
 def _champion(context: str) -> str | None:
@@ -218,22 +249,20 @@ def retrain_runs(context: str = "replay"):
 
 @app.get("/api/metrics")
 def metrics(context: str = "replay", window: int = 30, by: str = "global", store: str | None = None):
-    df = _ledger(context, store).dropna(subset=["actual_units_sold"])
-    if df.empty:
-        return []
-    end = df["forecast_date"].max()
-    df = df[df["forecast_date"] > end - pd.Timedelta(days=window)]
-    if by == "global":
-        return [{"segment": "all", **summarize(df["predicted_units"], df["actual_units_sold"])}]
-    key = {"category": "category", "store": "store_id", "product": "product_id", "model": "model_version"}.get(by)
-    if by == "weekday":
-        df = df.assign(weekday=df["forecast_date"].dt.day_name())
-        key = "weekday"
-    if not key:
+    key = {"global": None, "category": _P.c.category, "store": _P.c.store_id, "product": _P.c.product_id,
+           "model": _P.c.model_version, "weekday": _P.c.forecast_date}
+    if by not in key:
         raise HTTPException(400, "by must be global|category|store|product|weekday|model")
-    out = []
-    for seg, g in df.groupby(key):
-        out.append({"segment": seg, **summarize(g["predicted_units"], g["actual_units_sold"])})
+    t = _error_totals(context, store, window, key[by])
+    if t.empty or not int(t["n"].sum()):
+        return []
+    if by == "global":
+        return [{"segment": "all", **_summary(t.iloc[0])}]
+    col = t.columns[0]
+    if by == "weekday":  # per-day totals from SQL, folded into weekdays here (works on SQLite and Postgres)
+        t[col] = pd.to_datetime(t[col]).dt.day_name()
+        t = t.groupby(col, as_index=False)[["n", "abs_err", "err", "sq_err", "actual"]].sum()
+    out = [{"segment": r[col], **_summary(r)} for _, r in t.iterrows()]
     return sorted(out, key=lambda r: -(r["n"] or 0))[:200]
 
 
@@ -247,14 +276,13 @@ def metrics_timeseries(context: str = "replay", store: str | None = None):
         d = timescale.daily_series(engine, context, store)
         source = "timescale continuous aggregate"
     if d.empty:
-        df = _ledger(context, store).dropna(subset=["actual_units_sold"])
-        if df.empty:
+        t = _error_totals(context, store, by=[_P.c.forecast_date, _P.c.model_version])
+        if t.empty:
             return {"days": [], "reference_wape": None, "source": source}
-        df["abs_err"] = (df["predicted_units"] - df["actual_units_sold"]).abs()
-        df["err"] = df["predicted_units"] - df["actual_units_sold"]
-        d = df.groupby("forecast_date").agg(abs_err=("abs_err", "sum"), err=("err", "sum"),
-                                            actual=("actual_units_sold", "sum"),
-                                            version=("model_version", "first")).reset_index()
+        top = t.sort_values("actual", ascending=False).drop_duplicates("forecast_date").set_index("forecast_date")["model_version"]
+        d = t.groupby("forecast_date", as_index=False)[["abs_err", "err", "actual"]].sum()
+        d["version"] = d["forecast_date"].map(top)
+        d = d.sort_values("forecast_date")
         source = "ledger"
     d["forecast_date"] = pd.to_datetime(d["forecast_date"])
     d["wape"] = d["abs_err"] / d["actual"]
@@ -270,10 +298,7 @@ def metrics_timeseries(context: str = "replay", store: str | None = None):
 
 @app.get("/api/ledger")
 def ledger(context: str = "replay", store: str | None = None, product: str | None = None, limit: int = 200):
-    df = _ledger(context, store)
-    if product:
-        df = df[df["product_id"] == product]
-    df = df.sort_values("forecast_date", ascending=False).head(limit)
+    df = _ledger_rows(context, store, product, limit=limit, with_weather=True)
     df["forecast_date"] = df["forecast_date"].dt.strftime("%Y-%m-%d")
     df["error"] = df["predicted_units"] - df["actual_units_sold"]
     return df.replace({np.nan: None}).to_dict("records")
@@ -303,7 +328,7 @@ def recommendations(store_id: str, waste_cost_ratio: float = Query(default=None,
     rec["excess_ratio"] = rec["expiring_leftover"] / rec["p50"].clip(lower=1e-6)
     measured = store_learning.store_lift(engine, store_id)
     dates = [str((pd.Timestamp(rec["forecast_date"].iloc[0]) + pd.Timedelta(days=k)).date()) for k in range(14)] if len(rec) else []
-    plans = []
+    plans, clears = [], []
     for _, r in rec.iterrows():
         life = int(r["shelf_life"]) if "shelf_life" in r and not pd.isna(r.get("shelf_life")) else \
             settings.shelf_life_days.get(str(r["category"]), 3)
@@ -319,7 +344,12 @@ def recommendations(store_id: str, waste_cost_ratio: float = Query(default=None,
         price = float(r["sell_price_main"]) if not pd.isna(r.get("sell_price_main")) and r["sell_price_main"] > 0 else 1.0
         mp = markdown_plan.plan(cohorts, float(r["p50"]), price, lift or None, source)
         plans.append(mp)
+        clears.append(markdown_plan.lowest_clearing_discount(cohorts, float(r["p50"]), price, lift or None))
     rec["surplus_units"] = [mp.surplus_units for mp in plans]
+    # "Lowest discount at which it all still sells" (may cost more than the best plan; shown side by side).
+    rec["clear_all_discount"] = [c.discount if c else None for c in clears]
+    rec["clear_all_money_vs_no_action"] = [c.money_vs_no_action if c else None for c in clears]
+    rec["clear_all_unsold_at_deepest"] = [c.waste_at_deepest if c and c.discount is None else None for c in clears]
     rec["markdown"] = [max((st.discount for st in mp.steps if st.day == 0), default=0.0) for mp in plans]
     rec["markdown_schedule"] = [[{"date": dates[min(st.day, len(dates) - 1)], "discount": st.discount, "units": st.units,
                                   "days": st.days} for st in mp.steps] for mp in plans]
@@ -373,12 +403,14 @@ def _briefing(store_id: str) -> dict:
         health = model_health("production")
     except HTTPException:
         health = None
-    df = _ledger("replay", store_id).dropna(subset=["actual_units_sold"])
     recent = None
-    if len(df):
-        df = df[df["forecast_date"] > df["forecast_date"].max() - pd.Timedelta(days=14)]
-        m = summarize(df["predicted_units"], df["actual_units_sold"])
-        recent = {"days": 14, "wape": m["wape"], "bias": m["bias"], "source": "backtest ledger"}
+    kind = next((s.get("kind") for s in stores() if s["store_id"] == store_id), None)
+    ctx = "replay" if kind == "rohlik" else "production"  # uploaded stores: their own graded forecasts
+    t = _error_totals(ctx, store_id, window=14)
+    if not t.empty and int(t["n"].iloc[0] or 0):
+        m = _summary(t.iloc[0])
+        recent = {"days": 14, "wape": m["wape"], "bias": m["bias"],
+                  "source": "backtest ledger" if ctx == "replay" else "this store's graded forecasts"}
     risky = " ".join(str(i["name"]) for i in rec["items"][:5])
     fdate = str(rec["forecast_date"])[:10] if rec.get("forecast_date") else None
     notes, notes_source = (memory.relevant_notes(engine, store_id, fdate, f"events or standing orders affecting {risky}")
@@ -395,34 +427,62 @@ _BRIEFING_CACHE: dict[str, dict] = {}
 def get_briefing(store_id: str, refresh: bool = False):
     if refresh or store_id not in _BRIEFING_CACHE:
         _BRIEFING_CACHE[store_id] = _briefing(store_id)
-    return {**_BRIEFING_CACHE[store_id], "voice_available": bool(settings.elevenlabs_api_key)}
-
-
-@app.get("/api/stores/{store_id}/briefing/audio")
-def get_briefing_audio(store_id: str):
-    text = get_briefing(store_id)["text"]
-    try:
-        audio = briefing.speak(text)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"ElevenLabs unavailable: {e}")
-    if audio is None:
-        raise HTTPException(503, "Voice not configured (set ELEVENLABS_API_KEY in backend/.env)")
-    return Response(content=audio, media_type="audio/mpeg")
+    return _BRIEFING_CACHE[store_id]
 
 
 @app.get("/api/model-cards/{version}")
 def model_card(version: str):
-    """Full model card. Served from MongoDB Atlas when configured, else built from local state."""
+    """Full model card, assembled from the database and the model's meta.json."""
     from forecaster.db import model_cards
-    coll = model_cards.collection()
-    if coll is not None:
-        doc = coll.find_one({"_id": version})
-        if doc:
-            return {**doc, "source": "mongodb_atlas"}
     for c in model_cards.build_cards(engine, only=version):
         if c["_id"] == version:
             return {**c, "source": "local"}
     raise HTTPException(404, "unknown version")
+
+
+class ChatTurn(BaseModel):
+    role: str  # user | assistant
+    text: str
+
+
+class ChatIn(BaseModel):
+    message: str
+    history: list[ChatTurn] = []
+
+
+@app.post("/api/stores/{store_id}/chat")
+def store_chat(store_id: str, body: ChatIn, request: Request):
+    """Ask about this store in plain words; answered only from the store's own data (see chat.py)."""
+    msg = body.message.strip()
+    if not msg or len(msg) > chat.MAX_MESSAGE:
+        raise HTTPException(400, f"message must be 1-{chat.MAX_MESSAGE} characters")
+    client = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "?")).split(",")[0].strip()
+    if not chat.allowed(client):
+        raise HTTPException(429, "Too many questions; try again in a few minutes.")
+    store = next((s for s in stores() if s["store_id"] == store_id), None)
+    if store is None:
+        raise HTTPException(404, "unknown store")
+    try:
+        rec = recommendations(store_id, waste_cost_ratio=None, category=None)
+    except HTTPException:
+        rec = {"items": []}
+    try:
+        learning = store_learning.status(engine, store_id)
+    except Exception:  # noqa: BLE001 — no champion / no uploads yet
+        learning = None
+    sell = store_learning.sell_through(engine, store_id)
+    ctx = "replay" if store.get("kind") == "rohlik" else "store_eval"
+    t = _error_totals(ctx, store_id, window=14)
+    accuracy = None
+    if not t.empty and int(t["n"].iloc[0] or 0):
+        m = _summary(t.iloc[0])
+        accuracy = {"days": 14, "wape": m["wape"], "bias": m["bias"],
+                    "source": "2024 backtest replay" if ctx == "replay" else "this store's uploaded days"}
+    fdate = str(rec.get("forecast_date") or "")[:10]
+    notes = memory.relevant_notes(engine, store_id, fdate, msg)[0] if fdate else []
+    pack = chat.data_pack(rec, store, learning, sell, accuracy, notes)
+    reply, provider = chat.answer(pack, [h.model_dump() for h in body.history], msg)
+    return {"reply": reply, "provider": provider, "data_as_of": rec.get("as_of"), "forecast_date": rec.get("forecast_date")}
 
 
 class NoteIn(BaseModel):
@@ -453,8 +513,6 @@ def integrations():
     """Which optional integrations are configured (never returns the keys)."""
     return {"llm_provider": briefing.active_provider() or "template (no key)",
             "gemini": bool(settings.gemini_api_key), "gemini_model": settings.gemini_model,
-            "elevenlabs": bool(settings.elevenlabs_api_key),
-            "mongodb_model_cards": bool(settings.mongodb_uri),
             "backboard_memory": memory.enabled(),
             "database": engine.dialect.name,
             # healthy only if at least one hypertable actually exists (e.g. forecast_errors)
@@ -477,11 +535,11 @@ def live_weather(store_id: str):
 
 class StoreIn(BaseModel):
     store_id: str
-    city: str
-    lat: float
-    lon: float
-    timezone: str = "America/New_York"
-    country: str = "US"
+    city: str  # "Atlanta" or "Augusta, GA"; located with Open-Meteo geocoding when lat/lon are not given
+    lat: float | None = None
+    lon: float | None = None
+    timezone: str | None = None
+    country: str | None = None
     subdivision: str | None = None
     kind: str = "demo"  # demo (team-authored data) | owner (a real store's data)
 
@@ -502,14 +560,24 @@ def create_store(st: StoreIn):
         raise HTTPException(400, "store_id: letters, digits, '_' or '-' (max 40)")
     if st.kind not in ("demo", "owner"):
         raise HTTPException(400, "kind must be demo or owner")
+    city, lat, lon, tz, country, subdiv = st.city.strip(), st.lat, st.lon, st.timezone, st.country, st.subdivision
+    if lat is None or lon is None:
+        try:
+            place = om.geocode(city)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(502, f"couldn't look up the city right now ({type(e).__name__}); try again")
+        if not place:
+            raise HTTPException(400, f"couldn't find a city called {city!r}; try adding the state, e.g. 'Augusta, GA'")
+        city, lat, lon = place["city"], place["lat"], place["lon"]
+        tz, country, subdiv = tz or place["timezone"], country or place["country"], subdiv or place["subdivision"]
     with engine.begin() as conn:
         if conn.execute(select(S.stores.c.store_id).where(S.stores.c.store_id == sid)).first():
             raise HTTPException(409, "store already exists")
         conn.execute(insert(S.stores).values(
-            store_id=sid, city=st.city, lat=st.lat, lon=st.lon, timezone=st.timezone, country=st.country.upper(),
-            subdivision=st.subdivision, traffic_connected=False, kind=st.kind,
+            store_id=sid, city=city, lat=lat, lon=lon, timezone=tz or "UTC", country=(country or "US").upper(),
+            subdivision=subdiv, traffic_connected=False, kind=st.kind,
             label="Demo store — team-authored data" if st.kind == "demo" else "Owner-uploaded data"))
-    return {"store_id": sid}
+    return {"store_id": sid, "city": city, "lat": lat, "lon": lon, "timezone": tz}
 
 
 @app.get("/api/uploads/template.csv")
@@ -518,16 +586,49 @@ def upload_template():
                     headers={"Content-Disposition": 'attachment; filename="store_upload_template.csv"'})
 
 
-@app.post("/api/stores/{store_id}/uploads", dependencies=WRITE)
-async def upload_sheet(store_id: str, file: UploadFile = File(...)):
-    """Owner sheet → validate → first-party observations → real outcomes attached → the serving
-    model is graded on the uploaded days it never saw → tomorrow's plan from real stock."""
-    _require_uploadable(store_id)
+async def _read_upload(file: UploadFile) -> bytes:
     raw = await file.read(settings.max_upload_bytes + 1)
     if len(raw) > settings.max_upload_bytes:
         raise HTTPException(413, f"file larger than {settings.max_upload_bytes // (1024 * 1024)} MB")
+    return raw
+
+
+def _is_batch_sheet(raw: bytes, filename: str) -> bool:
+    """A batch sheet has one row per delivery with an expiry date; a daily sheet has one row per product-day."""
     try:
-        result = uploads.ingest(engine, store_id, raw, file.filename or "upload.csv")
+        if filename.lower().endswith((".xlsx", ".xlsm", ".xls")):
+            header = pd.read_excel(io.BytesIO(raw), nrows=0)
+        else:
+            header = pd.read_csv(io.BytesIO(raw), nrows=0)
+        cols = {str(c).strip().lower().replace(" ", "_") for c in header.columns}
+    except Exception:  # noqa: BLE001 — let the daily validator report what's wrong
+        return False
+    cols = {uploads.BATCH_ALIASES.get(c, c) for c in cols}
+    return "expiry_date" in cols or "batch_id" in cols
+
+
+@app.post("/api/stores/{store_id}/sheets", dependencies=WRITE)
+async def upload_any_sheet(store_id: str, background: BackgroundTasks, file: UploadFile = File(...)):
+    """One upload box: routes a daily sheet or a batch (delivery) sheet by its columns."""
+    _require_uploadable(store_id)
+    raw = await _read_upload(file)
+    name = file.filename or "upload.csv"
+    if _is_batch_sheet(raw, name):
+        return {"sheet": "batch", **_ingest_batches(store_id, raw, name)}
+    return {"sheet": "daily", **_ingest_daily(store_id, raw, name, background)}
+
+
+@app.post("/api/stores/{store_id}/uploads", dependencies=WRITE)
+async def upload_sheet(store_id: str, background: BackgroundTasks, file: UploadFile = File(...)):
+    """Owner sheet → validate → first-party observations → real outcomes attached → the serving
+    model is graded on the uploaded days it never saw → tomorrow's plan from real stock."""
+    _require_uploadable(store_id)
+    return _ingest_daily(store_id, await _read_upload(file), file.filename or "upload.csv", background)
+
+
+def _ingest_daily(store_id: str, raw: bytes, filename: str, background: BackgroundTasks | None) -> dict:
+    try:
+        result = uploads.ingest(engine, store_id, raw, filename)
     except ValueError as e:
         raise HTTPException(400, str(e))
     if result["accepted"]:
@@ -535,10 +636,24 @@ async def upload_sheet(store_id: str, file: UploadFile = File(...)):
         plan = store_learning.forecast_next_day(engine, store_id)
         result["next_forecast_date"] = plan["forecast_date"].iloc[0] if len(plan) else None
     hooks.after_outcomes(engine)
-    _LEDGER_CACHE.clear()
     _BRIEFING_CACHE.pop(store_id, None)
     result["learning"] = store_learning.status(engine, store_id)
+    if result["accepted"] and background is not None and _should_auto_retrain(store_id, result["learning"]):
+        result["retrain"] = _start_retrain(store_id, background)
     return result
+
+
+def _should_auto_retrain(store_id: str, learning: dict) -> bool:
+    """Retrain when the store has enough unseen days, at most once per week of new data."""
+    if not settings.auto_retrain or not learning.get("retrain_eligible"):
+        return False
+    if (_RETRAIN_JOBS.get(store_id) or {}).get("state") == "running":
+        return False
+    with engine.connect() as conn:
+        last = conn.execute(select(func.max(S.retrain_runs.c.as_of_date)).where(
+            S.retrain_runs.c.context.in_([f"store:{store_id}", f"global_from:{store_id}"]))).scalar()
+    return last is None or not learning.get("last_day") or \
+        pd.Timestamp(learning["last_day"]) - pd.Timestamp(last) >= pd.Timedelta(days=7)
 
 
 @app.get("/api/uploads/batch_template.csv")
@@ -552,11 +667,12 @@ async def upload_batches(store_id: str, file: UploadFile = File(...)):
     """Optional batch sheet: one row per delivery with its expiry date. Gives real expiry-aware
     stock for markdown planning, learned shelf lives, and exact sell-through per delivery."""
     _require_uploadable(store_id)
-    raw = await file.read(settings.max_upload_bytes + 1)
-    if len(raw) > settings.max_upload_bytes:
-        raise HTTPException(413, f"file larger than {settings.max_upload_bytes // (1024 * 1024)} MB")
+    return _ingest_batches(store_id, await _read_upload(file), file.filename or "batches.csv")
+
+
+def _ingest_batches(store_id: str, raw: bytes, filename: str) -> dict:
     try:
-        result = uploads.ingest_batches(engine, store_id, raw, file.filename or "batches.csv")
+        result = uploads.ingest_batches(engine, store_id, raw, filename)
     except ValueError as e:
         raise HTTPException(400, str(e))
     if result["accepted"] and (settings.artifacts_dir / "store_recs" / f"{store_id}.parquet").exists():
@@ -620,6 +736,10 @@ def _last_retrain_from_db(store_id: str) -> dict | None:
 @app.post("/api/stores/{store_id}/retrain", dependencies=WRITE)
 def retrain(store_id: str, background: BackgroundTasks):
     """Train a store challenger in the background; poll GET /api/stores/{id}/learning."""
+    return _start_retrain(store_id, background)
+
+
+def _start_retrain(store_id: str, background: BackgroundTasks) -> dict:
     job = _RETRAIN_JOBS.get(store_id)
     if job and job.get("state") == "running":
         return job
@@ -629,7 +749,6 @@ def retrain(store_id: str, background: BackgroundTasks):
         try:
             out = store_learning.retrain_store(engine, store_id)  # re-plans every store if promoted
             hooks.after_everything(engine)
-            _LEDGER_CACHE.clear()
             _BRIEFING_CACHE.clear()
             _RETRAIN_JOBS[store_id] = {"state": "done", **out}
         except Exception as e:  # noqa: BLE001 — surface the failure to the owner
@@ -648,7 +767,8 @@ def plan_csv(store_id: str, waste_cost_ratio: float = Query(default=None, ge=0.0
     rec = recommendations(store_id, waste_cost_ratio=waste_cost_ratio, category=None)
     cols = ["forecast_date", "store_id", "product_id", "name", "category", "p50", "p80", "on_hand",
             "expiring_tomorrow", "order_qty", "waste_risk", "surplus_units", "markdown", "schedule_text",
-            "surplus_action", "donate_units", "donate_date", "lift_source", "model_version"]
+            "surplus_action", "donate_units", "donate_date", "clear_all_discount", "clear_all_money_vs_no_action",
+            "clear_all_unsold_at_deepest", "lift_source", "model_version"]
     df = pd.DataFrame(rec["items"])
     df = df[[c for c in cols if c in df.columns]].rename(columns={"p50": "forecast_units", "p80": "forecast_p80"})
     return _csv(df, f"{store_id}_order_plan_{rec['forecast_date']}.csv")
@@ -656,7 +776,7 @@ def plan_csv(store_id: str, waste_cost_ratio: float = Query(default=None, ge=0.0
 
 @app.get("/api/ledger.csv")
 def ledger_csv(context: str = "production", store: str | None = None):
-    df = _ledger(context, store)
+    df = _ledger_rows(context, store)
     df["forecast_date"] = df["forecast_date"].dt.strftime("%Y-%m-%d")
     df["error"] = df["predicted_units"] - df["actual_units_sold"]
     cols = ["prediction_id", "context", "store_id", "product_id", "category", "forecast_date", "prediction_created_at",
@@ -847,12 +967,11 @@ def post_outcomes(rows: list[OutcomeRow]):
             accepted += 1
     if accepted:
         hooks.after_outcomes(engine)
-        _LEDGER_CACHE.clear()
     return {"accepted": accepted, "rejected": rejected}
 
 
 # Serve the built dashboard from the same origin in deployment (one container, one URL).
-_DIST = settings.artifacts_dir.parent / "frontend" / "dist"
+_DIST = REPO_ROOT / "frontend" / "dist"
 if _DIST.exists():
     from fastapi.responses import FileResponse
     from fastapi.staticfiles import StaticFiles

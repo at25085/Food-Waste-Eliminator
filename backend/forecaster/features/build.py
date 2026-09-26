@@ -82,12 +82,15 @@ def _calendar(df: pd.DataFrame) -> None:
         df[c] = df[c].fillna(0.0)
 
 
-def traffic_features(traffic: pd.DataFrame, horizon: int) -> pd.DataFrame:
-    """Store-day traffic features. `traffic` has store_id, date, customer_count (observed)."""
+def traffic_features(traffic: pd.DataFrame, horizon: int, end: pd.Timestamp | None = None) -> pd.DataFrame:
+    """Store-day traffic features. `traffic` has store_id, date, customer_count (observed).
+    `end` extends every store's rows to the last day being forecast: tomorrow's count is unknown,
+    but its lags and rolling means come from days already observed."""
     t = traffic.sort_values(["store_id", "date"]).copy()
     out = []
     for _, g in t.groupby("store_id", sort=False):
-        full = pd.date_range(g["date"].min(), g["date"].max(), freq="D")
+        last = max(g["date"].max(), end) if end is not None else g["date"].max()
+        full = pd.date_range(g["date"].min(), last, freq="D")
         g = g.set_index("date").reindex(full)
         g.index.name = "date"
         g["store_id"] = g["store_id"].ffill().bfill()
@@ -167,7 +170,7 @@ def build_features(panel: pd.DataFrame, weather: pd.DataFrame | None, traffic: p
 
     # Traffic (NaN when the store has no traffic feed — XGBoost treats NaN as missing).
     if traffic is not None and len(traffic):
-        tf = traffic_features(traffic, horizon)
+        tf = traffic_features(traffic, horizon, end=df["date"].max())
         df = df.merge(tf.drop(columns=["customer_count"]), on=["store_id", "date"], how="left")
         cust_base = df["customer_count_lag_h"]
         units_base = df.groupby(["store_id", "product_id"], sort=False)["sales"].shift(horizon)

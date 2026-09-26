@@ -5,8 +5,7 @@
                                       ├─ Caddy (HTTPS)
                                       └─ app container: API + dashboard + the trained models
                                            ├─ reads models from /opt/forecaster/artifacts (persistent)
-                                           ├─ DATABASE_URL ─► Tiger Cloud (Postgres + TimescaleDB)
-                                           └─ MONGODB_URI  ─► MongoDB Atlas (optional, model cards)
+                                           └─ DATABASE_URL ─► Tiger Cloud (Postgres + TimescaleDB), the only database
 ```
 
 The trained models live on the Vultr server's disk (a Docker volume), because the server runs
@@ -14,8 +13,7 @@ them: an owner's upload is validated, saved to Tiger Cloud, run through the mode
 saved back. Retrains made on the server write new model versions to the same volume.
 
 ## 1. Accounts (you)
-- **Tiger Cloud** service → connection string; change `postgres://` to `postgresql+psycopg://`.
-- **MongoDB Atlas** M0 cluster (optional) → `mongodb+srv://…`; allow the Vultr server's IP.
+- **Tiger Cloud** service → connection string; paste it into `DATABASE_URL` exactly as shown.
 - **Vultr** Cloud Compute, Ubuntu. 4 vCPU / 8 GB if you want to press "Retrain" live
   (a retrain takes ~6–8 min and 2–3 GB RAM); 2 vCPU / 4 GB is enough to only serve plans.
   Add your SSH key when creating it.
@@ -24,10 +22,9 @@ saved back. Retrains made on the server write new model versions to the same vol
 ## 2. `backend/.env`
 ```
 DATABASE_URL=postgresql+psycopg://…tiger cloud…
-MONGODB_URI=mongodb+srv://…            # optional
-GEMINI_API_KEY=…  ELEVENLABS_API_KEY=…  BACKBOARD_API_KEY=…
+GEMINI_API_KEY=…  BACKBOARD_API_KEY=…
 API_TOKEN=<long random string>         # locks uploads/retrain/rollback; open the dashboard once with ?token=…
-APP_DISPLAY_NAME=<new name>
+APP_DISPLAY_NAME=Freshora              # optional; this is the default
 DOMAIN=yourname.tech
 ```
 
@@ -47,7 +44,14 @@ Installs Docker if needed, copies the code, the served models (`demand_v*`), pla
 training data, then builds and starts the app + Caddy. HTTPS is automatic once the domain points at
 the server. Re-run the same command to redeploy; the volumes (models, plans) are kept.
 
+## End-to-end check (any URL)
+```bash
+python scripts/e2e_check.py https://yourname.tech --token "$API_TOKEN"      # add --retrain for the slow part
+```
+Creates a test store `E2E_Test`, uploads the sample sheets, and checks plans, CSVs, Timescale,
+Backboard, Gemini (briefing + store chat), model cards and the write lock (PASS/FAIL per step). It writes to the
+database, so reset afterwards by re-running step 3.
+
 ## Checks after deploy
 - `https://yourname.tech/api/integrations` → `"database": "postgresql"`, `timescale.healthy: true`
-  (and `mongodb_model_cards: true` if Atlas is set).
-- Dashboard → Model health shows the champion; Learning loop chart says it reads from Timescale.
+- Dashboard → "Forecast vs. what sold" loads; `/api/metrics/timeseries` reports `source: timescale continuous aggregate`.

@@ -40,6 +40,18 @@ def test_features_do_not_see_the_future():
     pd.testing.assert_frame_equal(ra, rb)  # the row for date `cut` cannot see `cut`'s own sales
 
 
+def test_tomorrow_gets_traffic_features_from_observed_days():
+    """Serving row (tomorrow) has no observed traffic yet; its lags/rolling means must still be filled."""
+    panel = complete_daily_index(_panel())
+    traffic = panel.groupby(["store_id", "date"], as_index=False)["customer_count"].first()
+    last = panel["date"].max()
+    nxt = panel[panel["date"] == last].assign(date=last + pd.Timedelta(days=1), sales=np.nan, customer_count=np.nan)
+    feat = build_features(pd.concat([panel, nxt], ignore_index=True), None, traffic, horizon=1)
+    row = feat[feat["date"] == last + pd.Timedelta(days=1)]
+    assert row["customer_count_lag_h"].eq(1000.0).all()
+    assert row["customer_count_rolling_7_mean"].eq(1000.0).all()
+
+
 def test_validation_quarantines_with_reasons():
     df = _panel(days=5)
     df.loc[0, "sales"] = -3
@@ -190,3 +202,44 @@ def test_stockout_days_detected_from_owner_sheets():
                           "units_received": [20, 10, 10], "sales": [15, 15, 8], "stock_end": [5, 0, 2]})
     # day 2: 5 left + 10 delivered, all 15 sold, shelf empty → stockout (sales capped)
     assert stock_availability(panel).tolist() == [1.0, 0.5, 1.0]
+
+
+def test_chat_flags_numbers_that_are_not_in_the_data():
+    from forecaster.chat import unverified_numbers
+    pack = "WAPE 20.4%, bias +13.7%. graded_forecasts=3340\nproduct,p50\nGrape_10,1423\nshare,70%\n"
+    assert unverified_numbers("Error 20.4% over 3,340 forecasts; Grape_10 sells 1,423 units; 70% sold", pack) == []
+    assert unverified_numbers("MAE is 53.32 and RMSE 279.32 across 3 products", pack) == ["53.32", "279.32"]
+    csv_pack = "product,received,sold,wasted\nGrape_10,46728,32501,14227\n"  # CSV commas are separators
+    assert unverified_numbers("Grape_10: 14,227 units wasted of 46728 received", csv_pack) == []
+
+
+def test_lowest_clearing_discount_is_the_smallest_level_that_sells_everything():
+    from forecaster.decisions import markdown_plan as mp
+    lift = {0.2: 0.10, 0.3: 0.25, 0.35: 0.30, 0.45: 0.40, 0.5: 0.50, 0.6: 0.60}
+    # 125 units, 2 days left, demand 50/day: 25 would spoil; 30% off sells 62.5/day → clears all.
+    c = mp.lowest_clearing_discount([(125.0, 2)], 50.0, 1.0, lift)
+    assert c.discount == 0.3 and c.money_vs_no_action is not None
+    assert mp.lowest_clearing_discount([(80.0, 2)], 50.0, 1.0, lift) is None  # nothing would spoil
+    none = mp.lowest_clearing_discount([(400.0, 2)], 50.0, 1.0, lift)  # even 60% off sells only 160
+    assert none.discount is None and round(none.waste_at_deepest) == 240
+
+
+def test_synthetic_dairy_and_eggs_follow_real_traffic_and_are_reproducible():
+    from forecaster.data import synthetic
+    panel = _panel(days=120)
+    panel["series_id"] = panel["series_id"].astype(str)
+    a, b = synthetic.ensure(panel), synthetic.ensure(panel)
+    assert a.equals(b) and synthetic.ensure(a).equals(a)  # deterministic and idempotent
+    syn = a[a["series_id"].str.startswith(synthetic.SYNTHETIC_PREFIX)]
+    assert set(syn["category"]) == {"Dairy products", "Eggs"} and syn["product_id"].nunique() == 14
+    assert (syn["sales"] >= 0).all() and syn["sales"].mean() > 0
+    assert len(a) - len(panel) == len(syn)  # real rows untouched
+
+
+def test_briefing_template_is_four_bullets():
+    from forecaster.briefing import template
+    f = {"total_forecast_units": 1234, "forecast_date": "2024-06-03", "items_at_high_waste_risk": 2,
+         "waste_risk_items": [{"name": "Eggs_1", "suggested_markdown_pct": 20}], "largest_orders": [{"name": "Dairy_2", "order_qty": 90}],
+         "recent_model_error": {"days": 14, "wape": 0.12, "bias": -0.02}}
+    lines = template(f).splitlines()
+    assert len(lines) == 4 and all(l.startswith("- ") for l in lines) and "20% off" in lines[1]

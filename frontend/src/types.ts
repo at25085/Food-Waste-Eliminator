@@ -438,11 +438,7 @@ export interface LearningStatus {
 
 export interface StoreIn {
   store_id: string;
+  /** "Atlanta" or "Augusta, GA": the server looks up coordinates, timezone and state. */
   city: string;
-  lat: number;
-  lon: number;
-  timezone: string;
-  country: string;
-  subdivision: string | null;
   kind: "demo" | "owner";
 }

@@ -19,10 +19,10 @@ from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import insert, update
+from sqlalchemy import delete, insert, select, update
 
 from forecaster.config import STORE_LOCATIONS, settings
-from forecaster.data import rohlik
+from forecaster.data import rohlik, synthetic
 from forecaster.data.prepare import processed_dir
 from forecaster.db import schema as S
 from forecaster.db.schema import create_all, get_engine
@@ -62,6 +62,16 @@ def next_day_frame(panel: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
     nxt["holiday"] = 0.0  # filled from the public holiday calendar inside build_features
     nxt["shops_closed"] = 0.0  # planned closures would come from the store; none known
     return nxt
+
+
+def replace_ungraded(conn, store_ids: list[str], forecast_date) -> int:
+    """A re-plan for the same day (new champion or corrected inputs) supersedes that day's forecasts
+    that have no outcome yet. Graded forecasts are never touched."""
+    graded = select(S.outcomes.c.prediction_id)
+    res = conn.execute(delete(S.predictions).where(
+        (S.predictions.c.context == "production") & S.predictions.c.store_id.in_(store_ids)
+        & (S.predictions.c.forecast_date == forecast_date) & S.predictions.c.prediction_id.not_in(graded)))
+    return res.rowcount or 0
 
 
 def plan_existing_stores(engine, cand, version: str, log=print) -> pd.DataFrame:
@@ -149,6 +159,7 @@ def plan_existing_stores(engine, cand, version: str, log=print) -> pd.DataFrame:
                           expected_customers=None,
                           model_version=version, feature_schema_version=FEATURE_SCHEMA_VERSION))
     with engine.begin() as conn:
+        replace_ungraded(conn, rec["store_id"].unique().tolist(), tomorrow.date())
         conn.execute(insert(S.predictions), preds)
 
     log(f"planned {len(rec)} products for {tomorrow.date()} with {version}")
@@ -180,17 +191,25 @@ def main() -> None:
     hold["pred_no_traffic"] = cand.predict(hold, drop_traffic=True)
     for k, v in demand.baseline_predictions(hold).items():
         hold[k] = v
+    # Headline numbers use real (observed) series only; the synthetic Dairy/Eggs series are reported
+    # separately and labeled — accuracy on generated data proves nothing about real stores.
+    synth = hold["series_id"].astype(str).str.startswith(synthetic.SYNTHETIC_PREFIX)
+    hold_all, hold = hold, hold[~synth]
     test = {c: summarize(hold[c], hold["sales"]) for c in ["pred", "pred_no_traffic", "seasonal_naive_7", "rolling_mean_28"]}
     test["by_category"] = by_segment(hold, "pred", "sales", "category").to_dict("records")
     test["by_store"] = by_segment(hold, "pred", "sales", "store_id").to_dict("records")
     test["by_weekday"] = by_segment(hold.assign(weekday=hold["date"].dt.day_name()), "pred", "sales", "weekday").to_dict("records")
+    test["synthetic_categories"] = {
+        "label": "SYNTHETIC — generated Dairy/Eggs series, not observed data",
+        "by_category": by_segment(hold_all[synth], "pred", "sales", "category").to_dict("records"),
+        "last_week_baseline": summarize(hold_all.loc[synth, "seasonal_naive_7"], hold_all.loc[synth, "sales"])}
     p80_cov = float((hold["sales"] <= hold["p80"]).mean())
     log(f"production candidate: test WAPE {test['pred']['wape']:.3f} (no traffic {test['pred_no_traffic']['wape']:.3f}, "
         f"naive {test['seasonal_naive_7']['wape']:.3f}); P80 coverage {p80_cov:.2f}")
 
     # Weather ablation — measured, reported whichever way it goes.
     cand_nw = lifecycle.train_candidate(rows, cutoff, TRAIN_START, exclude=tuple(WEATHER))
-    test["pred_no_weather"] = summarize(cand_nw.predict(hold), hold["sales"])
+    test["pred_no_weather"] = summarize(cand_nw.predict(hold), hold["sales"])  # real series only
     log(f"weather ablation: with {test['pred']['wape']:.4f} vs without {test['pred_no_weather']['wape']:.4f}")
 
     version = registry.next_version()
@@ -206,7 +225,8 @@ def main() -> None:
             feature_schema_version=FEATURE_SCHEMA_VERSION, params=cand.meta["params"],
             metrics={"train": cand.train_metrics, "test": test["pred"], "p80_coverage": p80_cov},
             artifact_uri=str(registry.models_dir() / version), created_at=_now(), promotion_status="champion",
-            decision_reason="HackGT bootstrap model: Rohlik history + Open-Meteo archived forecasts; 28-day holdout test",
+            decision_reason="Bootstrap model: Rohlik history + synthetic Dairy/Eggs + Open-Meteo archived forecasts; "
+                            "28-day holdout test on real series",
             context="production"))
         conn.execute(insert(S.champion_history).values(context="production", version=version, effective_at=_now(),
                                                        as_of_date=end.date(), reason="bootstrap"))

@@ -12,5 +12,4 @@ pydantic-settings>=2.2
 python-multipart>=0.0.9
 pytest>=8
 holidays>=0.50
-pymongo>=4.8
 openpyxl>=3.1

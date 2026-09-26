@@ -1,8 +1,6 @@
-# WasteLess — Architecture (working name)
+# Freshora — Architecture
 
-> **Name warning.** "Wasteless" is a live, funded company (wasteless.com) that sells AI markdowns for
-> perishables to grocers. Rename before Devpost submission. The code package is named `forecaster`
-> and the display name is one config value (`APP_DISPLAY_NAME`), so a rename is a one-line change.
+> The code package is named `forecaster`; the display name is one config value (`APP_DISPLAY_NAME`).
 
 ## 1. What the system is
 
@@ -32,7 +30,11 @@ Rohlik is a Czech online grocer. Its public Kaggle competition data is mirrored 
 | `rohlik_sales_1D` | product × warehouse × day | 5,390 series; **perishables only** (Fruit & vegetable 3,246 · Bakery 1,611 · Meat & fish 533); `sales`, `sell_price_main`, `availability`, 7 discount types, holiday / school-holiday / shops-closed flags, **`total_orders`**; 2020-08-01 → 2024-06-02 |
 | `rohlik_orders_1D` | warehouse × day | 7 warehouses; `orders`, holidays, shutdowns, **`precipitation`, `snow`** (dataset weather), user activity; 2020-12-05 → 2024-03-15 |
 
-"Store" = Rohlik warehouse (Prague_1/2/3, Brno_1, Budapest_1, Munich_1, Frankfurt_1).
+Training "stores" = the seven Rohlik warehouses (Prague_1/2/3, Brno_1, Budapest_1, Munich_1, Frankfurt_1), hidden
+in the UI. The dashboard shows a demo chain — **Atlanta, Macon, Augusta** — each replaying one warehouse's real sales
+at a Georgia location through the normal upload path (`pipeline/make_demo_chain.py`). The Rohlik data has no dairy
+or eggs, so **Dairy products** and **Eggs** series are synthetic (`data/synthetic.py`: driven by each warehouse's
+real daily customer counts and calendar, with promotions and noise); headline accuracy is measured on real series only.
 **`total_orders` is a real, first-party customer-count signal** (orders ≈ customer visits for an
 e-grocer). We do not fabricate traffic for any store: stores without a traffic feed show
 *"Customer traffic not connected"*.
@@ -243,8 +245,10 @@ and the artifact that was evaluated is exactly the artifact that is promoted. Ro
   existing stores. Then it replaces the champion for every store and all plans are regenerated.
 
 ### 6.5 Honest hackathon demonstration
-- **Model Health panel**: current champion, training range + weather source, measured test WAPE,
-  new real store observations `0 / threshold`, next retraining eligibility.
+- **Upload screen, learning status**: serving model, whether it has learned from this store, graded
+  forecasts and error on the store's own days, new days toward the next retrain, the last retrain's
+  decision and reason. (The Model health and Learning loop screens were removed from the UI on
+  request; their API endpoints remain.)
 - **Historical replay (labeled "backtest", never "live customers")**: replay Jan–Jun 2024 day by
   day using Previous Runs D+1 forecasts. Each simulated day the champion writes predictions,
   the next day's actuals are attached as outcomes, metrics tick, and every 14 days a challenger
@@ -281,20 +285,27 @@ backend/forecaster/
 | `GET /api/replay` | precomputed backtest timeline (version changes, WAPE, decisions) |
 
 ## 8. Frontend
-React + Vite + TypeScript + Recharts. Screens: **Today** (per-store recommendations, weather card,
-waste-cost slider), **Model Health** (champion/challenger history, WAPE and bias charts, promotion
-decisions, rollback), **Ledger** (prediction vs outcome), **Data Sources**, **Replay** (time
-machine).
+React + Vite + TypeScript + Recharts, styled after the team's original design (white cards on a
+light-grey page, green brand, top navigation). Screens:
+- **Dashboard**: store tabs (Atlanta, Macon, Augusta, plus any store an owner adds); customers/day,
+  expected sales, units to order, units at risk of waste; expected sales by category (Bakery red,
+  Fruits and vegetables orange, Meat and fish yellow, Dairy green, Eggs blue); forecast vs. what sold;
+  what to order + order-report CSV.
+- **Today's plan**: per-product orders, waste risk and discount/donate plans; weather for the store's
+  city in °F; the order-more/order-less slider; a four-bullet morning briefing whose bullets open the Ledger.
+- **Upload**: add a store by name and city (coordinates, timezone and state are looked up); one box for
+  daily sheets that also recognises delivery (batch) sheets. Retraining starts automatically when a
+  store has enough new days (at most once per week of new data).
+- **Ledger**: each forecast, saved before the day's sales, next to what sold.
+- **About**, and a chat launcher (bottom right) that answers from the selected store's data.
 
 ## 9. Integrations and why each is there
 
 | Integration | Role | Why this tool |
 |---|---|---|
-| Oracle of the Deep (primary track) | Forecasting, governed retraining, lead-time-true weather, measured ablations | — |
+| A Marina's Mission (main track, Social Good) | Less fresh food wasted: right-sized orders, profitable markdowns, donation of what's left | — |
 | TimescaleDB / Tiger Data | Ledger-derived `forecast_errors` hypertable + `daily_forecast_error` continuous aggregate; `observations` and `traffic_observations` hypertables | Time-series facts, rolling windows, incremental aggregation |
-| MongoDB Atlas | Model cards: one document per version (params, feature list, importance, evaluation, decision) | Nested, schema-changing documents read whole by version. Postgres JSONB could also hold them; we keep time series and model documents in the store built for each |
-| Gemini | Morning briefing written from computed facts; never adds numbers | Language layer only — every number comes from the model |
-| ElevenLabs | Reads the briefing aloud | Hands-free for a manager on the floor |
+| Gemini | "Ask about your store" chat and the morning briefing, both answered only from the store's own data pack (plan, sell-through, accuracy, notes, and per product the lowest discount at which the model predicts everything sells before expiry, next to the most profitable plan); every number in a chat reply is checked against that data, with one correction round and a visible warning if a figure still can't be matched | Language layer only — every number comes from the model and the owner's sheets |
 | Backboard | Persistent per-store memory of manager notes (events, standing orders, overrides) | What the manager knows that the data doesn't; informs the briefing, never changes forecasts |
 | Vultr + .tech | One container serving API + dashboard at a public URL | Judges can open it; writes locked with `API_TOKEN` |
 | Cursor | Code review during development (documented for SpaceXAI) | Development tool, not a runtime dependency |

@@ -29,7 +29,19 @@ ALIASES = {
     "shelf_life": "shelf_life_days", "days_until_spoiled": "shelf_life_days", "shelf_days": "shelf_life_days",
     "footfall": "customers", "customer_count": "customers", "transactions": "customers",
 }
-CATEGORIES = ("Fruit and vegetable", "Bakery", "Meat and fish")
+CATEGORIES = ("Fruit and vegetable", "Bakery", "Meat and fish", "Dairy products", "Eggs")
+CATEGORY_ALIASES = {  # what owners type → the model's category name (matched case-insensitively)
+    "fruit and vegetable": "Fruit and vegetable", "fruits and vegetables": "Fruit and vegetable",
+    "fruit & vegetables": "Fruit and vegetable", "produce": "Fruit and vegetable", "fruit": "Fruit and vegetable",
+    "vegetables": "Fruit and vegetable", "bakery": "Bakery", "bread": "Bakery", "meat and fish": "Meat and fish",
+    "meat & fish": "Meat and fish", "meat": "Meat and fish", "fish": "Meat and fish", "seafood": "Meat and fish",
+    "dairy products": "Dairy products", "dairy": "Dairy products", "eggs": "Eggs", "egg": "Eggs",
+}
+
+
+def normalize_category(s: pd.Series) -> pd.Series:
+    key = s.astype("string").str.strip().str.lower()
+    return key.map(CATEGORY_ALIASES).fillna(s)
 MAX_ROWS = 200_000
 
 
@@ -64,6 +76,7 @@ def validate(df: pd.DataFrame, existing_keys: set[tuple[str, str]], today: date)
             df[c] = np.nan
     df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.normalize()
     df["product_id"] = df["product_id"].astype("string").str.strip()
+    df["category"] = normalize_category(df["category"])
     for c in ["units_received", "units_sold", "units_wasted", "price", "discount", "stock_end", "customers",
               "shelf_life_days"]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
@@ -235,6 +248,7 @@ def validate_batches(df: pd.DataFrame, existing: set[str], today: date) -> tuple
         mask = pd.Series(mask, index=df.index).fillna(False).astype(bool)
         reasons.loc[mask] = reasons.loc[mask].where(reasons.loc[mask] == "", reasons.loc[mask] + ";") + reason
 
+    df["category"] = normalize_category(df["category"])
     flag(df["received_date"].isna() | df["expiry_date"].isna(), "missing_or_bad_date")
     flag(df["received_date"] > pd.Timestamp(today), "future_delivery")
     flag(df["expiry_date"] < df["received_date"], "expires_before_delivery")

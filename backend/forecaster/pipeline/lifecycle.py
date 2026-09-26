@@ -12,7 +12,7 @@ from forecaster.features.build import FEATURE_SCHEMA_VERSION
 from forecaster.models import demand
 from forecaster.models.metrics import summarize
 
-MAJOR_CATEGORIES = ("Fruit and vegetable", "Bakery", "Meat and fish")
+MAJOR_CATEGORIES = ("Fruit and vegetable", "Bakery", "Meat and fish", "Dairy products", "Eggs")
 ES_VALID_DAYS = 49  # early-stopping window inside the candidate's own training range
 
 
@@ -157,8 +157,8 @@ def decide(champion: dict, challenger: dict, baselines: dict[str, dict], train_m
     }
     worst = 0.0
     for cat in MAJOR_CATEGORIES:
-        c = champion["by_category"][cat]["wape"]
-        n = challenger["by_category"][cat]["wape"]
+        c = (champion["by_category"].get(cat) or {}).get("wape")  # a category may be absent from a window
+        n = (challenger["by_category"].get(cat) or {}).get("wape")
         if c and n:
             deg = (n - c) / c
             checks["category_regressions"][cat] = round(deg, 4)

@@ -137,3 +137,8 @@ export function reasonText(code: string): string {
 export function reasonHint(code: string): string | undefined {
   return REASON_HINT[code];
 }
+
+/** US units for the dashboard: the weather API returns °C, mm and km/h. */
+export const fahrenheit = (c: number | null | undefined): string => (isNum(c) ? `${Math.round((c * 9) / 5 + 32)}°F` : "–");
+export const inches = (mm: number | null | undefined): string => (isNum(mm) ? `${(mm / 25.4).toFixed(2)} in` : "–");
+export const mph = (kmh: number | null | undefined): string => (isNum(kmh) ? `${Math.round(kmh / 1.609)} mph` : "–");

@@ -7,7 +7,7 @@ import pytest
 _TMP = os.path.join(os.environ.get("TMP", "/tmp"), "fc_test_" + uuid.uuid4().hex)
 os.makedirs(_TMP, exist_ok=True)
 os.environ["ARTIFACTS_DIR"] = _TMP
-for _k in ("GEMINI_API_KEY", "ELEVENLABS_API_KEY", "BACKBOARD_API_KEY", "MONGODB_URI", "API_TOKEN"):
+for _k in ("GEMINI_API_KEY", "BACKBOARD_API_KEY", "API_TOKEN"):
     os.environ[_k] = ""  # tests never call external services, whatever backend/.env contains
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(os.environ.get('TMP', '/tmp'), 'fc_test_' + uuid.uuid4().hex + '.db')}"
 
@@ -186,7 +186,7 @@ def test_upload_validates_rows_and_attaches_real_outcomes(seeded):
         {**good, "date": "2026-09-22", "units_received": 40, "units_sold": 30, "units_wasted": 0, "stock_end": 99},  # doesn't balance
         {**good, "date": "2026-09-23", "units_sold": -1},                     # negative
         {**good, "date": "2099-01-01"},                                       # future
-        {**good, "product_id": "milk", "category": "Dairy"},                  # unknown category
+        {**good, "product_id": "milk", "category": "Frozen"},                 # unknown category
         {**good, "product_id": "kale", "units_wasted": 500, "date": "2026-09-21"},  # first day for kale: can't check
     ])
     out = uploads.ingest(api.engine, "Prague_1", raw, "week.csv", today=date(2026, 9, 25))
@@ -251,3 +251,63 @@ def test_adherence_attributes_waste_to_over_ordering(seeded):
     a = store_learning.adherence(api.engine, "Budapest_1")
     assert a["compared_orders"] == 1 and a["over_ordered"] == 1 and a["excess_units"] == 30
     assert a["waste_after_over_ordering"] == 12  # the 12 wasted next day trace to the over-order
+
+
+def test_chat_validates_and_answers_without_a_key(seeded):
+    r = client.post("/api/stores/Prague_1/chat", json={"message": "What should I discount?"})
+    assert r.status_code == 200 and r.json()["provider"] == "none"  # no Gemini key in tests
+    assert client.post("/api/stores/Prague_1/chat", json={"message": "  "}).status_code == 400
+    assert client.post("/api/stores/Prague_1/chat", json={"message": "x" * 501}).status_code == 400
+    assert client.post("/api/stores/Nowhere/chat", json={"message": "hi"}).status_code == 404
+
+
+def test_owner_category_spellings_are_accepted():
+    import pandas as pd
+    from forecaster.data.uploads import normalize_category
+    got = normalize_category(pd.Series(["Dairy", "fruits and vegetables", "EGG", "Meat & fish", "Bakery", "Frozen"])).tolist()
+    assert got == ["Dairy products", "Fruit and vegetable", "Eggs", "Meat and fish", "Bakery", "Frozen"]
+
+
+def test_store_is_created_from_a_city_name(seeded, monkeypatch):
+    from forecaster.weather import open_meteo as om
+    monkeypatch.setattr(om, "geocode", lambda place: {"city": "Macon", "lat": 32.84, "lon": -83.63, "timezone": "America/New_York",
+                                                      "country": "US", "subdivision": "GA"} if place.startswith("Macon") else None)
+    r = client.post("/api/stores", json={"store_id": "Macon Test", "city": "Macon, GA", "kind": "owner"})
+    assert r.status_code == 200 and r.json()["timezone"] == "America/New_York"
+    st = {s["store_id"]: s for s in client.get("/api/stores").json()}["Macon_Test"]
+    assert (st["lat"], st["country"], st["subdivision"]) == (32.84, "US", "GA")
+    assert client.post("/api/stores", json={"store_id": "Nowhere", "city": "Qqqzzz"}).status_code == 400
+
+
+def test_one_upload_box_routes_daily_and_delivery_sheets(seeded, monkeypatch):
+    from forecaster.weather import open_meteo as om
+    monkeypatch.setattr(om, "geocode", lambda place: {"city": "Athens", "lat": 33.96, "lon": -83.38, "timezone": "America/New_York",
+                                                      "country": "US", "subdivision": "GA"})
+    client.post("/api/stores", json={"store_id": "Sniff", "city": "Athens", "kind": "owner"})
+    import pandas as pd
+    from forecaster.pipeline import store_learning  # no trained model files in the test environment
+    monkeypatch.setattr(store_learning, "evaluate_uploaded_days", lambda *a, **k: {"evaluated_rows": 0})
+    monkeypatch.setattr(store_learning, "forecast_next_day", lambda *a, **k: pd.DataFrame({"forecast_date": []}))
+    monkeypatch.setattr(store_learning, "status", lambda *a, **k: {"retrain_eligible": False})
+    batch = _sheet([{"batch_id": "Z1", "product_id": "egg12", "category": "Eggs", "received_date": "2026-09-10",
+                     "quantity": 20, "expiry_date": "2026-09-30", "sold": 5}])
+    r = client.post("/api/stores/Sniff/sheets", files={"file": ("deliveries.csv", batch, "text/csv")})
+    assert r.status_code == 200 and r.json()["sheet"] == "batch" and r.json()["accepted"] == 1
+    daily = _sheet([{"date": "2026-09-20", "product_id": "egg12", "category": "eggs", "units_received": 20, "units_sold": 5,
+                     "units_wasted": 0, "price": 3.5, "stock_end": 15, "shelf_life_days": 21}])
+    r = client.post("/api/stores/Sniff/sheets", files={"file": ("monday.csv", daily, "text/csv")})
+    assert r.status_code == 200 and r.json()["sheet"] == "daily" and r.json()["accepted"] == 1
+
+
+def test_auto_retrain_needs_eligibility_and_a_week_between_runs(seeded, monkeypatch):
+    monkeypatch.setattr(api.settings, "auto_retrain", True)
+    assert not api._should_auto_retrain("Brno_1", {"retrain_eligible": False, "last_day": "2026-09-20"})
+    assert api._should_auto_retrain("Brno_1", {"retrain_eligible": True, "last_day": "2026-09-20"})  # no run yet
+    with api.engine.begin() as conn:
+        conn.execute(insert(S.retrain_runs).values(
+            run_id="auto1", context="global_from:Brno_1", as_of_date=date(2026, 9, 16), created_at=datetime.now(timezone.utc),
+            champion_version="demand_v2", candidate_version=None, decision="rejected", reason="t", comparison={}))
+    assert not api._should_auto_retrain("Brno_1", {"retrain_eligible": True, "last_day": "2026-09-20"})  # 4 days later
+    assert api._should_auto_retrain("Brno_1", {"retrain_eligible": True, "last_day": "2026-09-24"})  # a week later
+    monkeypatch.setattr(api.settings, "auto_retrain", False)
+    assert not api._should_auto_retrain("Brno_1", {"retrain_eligible": True, "last_day": "2026-09-24"})

@@ -1,7 +1,7 @@
-# Devpost write-up (draft) — replace NAME everywhere
+# Devpost write-up (draft)
 
-**Main track: A Marina's Mission (Social Good).** Sponsor / MLH: Tiger Data, MongoDB Atlas,
-Gemini, ElevenLabs, Backboard, Vultr, .Tech, Notability, SpaceXAI (Cursor) — plus Visa if "Last Call"
+**Main track: A Marina's Mission (Social Good).** Sponsor / MLH: Tiger Data,
+Gemini, Backboard, Vultr, .Tech, Notability, SpaceXAI (Cursor) — plus Visa if "Last Call"
 ships (see docs/SPONSOR_OPTIONS.md).
 
 ## Tagline
@@ -27,16 +27,18 @@ people instead of the bin.
   neither has seen, doesn't lose in either week of that window, doesn't make any major category >5%
   worse, beats two naive baselines and passes an overfit guard — otherwise it's rejected with the
   reason on screen. Any previous champion can be restored.
-- **Explains itself.** A morning briefing (Gemini, read aloud by ElevenLabs) written only from the
-  computed plan; manager notes live in Backboard memory and inform the briefing without ever
-  changing forecast numbers.
+- **Explains itself.** Owners ask in plain words ("what should I discount?", "what did I waste most
+  of?") and Gemini answers only from their own plan, sheets and forecast record; every number in a
+  reply is checked against that data before it's shown. A morning briefing is written the same
+  way; manager notes live in Backboard memory and inform answers
+  without ever changing forecast numbers.
 
 ## Results (all on data the model never trained on)
 - **Forecast error 14.4% (WAPE)** over a Jan–Jun 2024 replay vs **24.2%** for "same weekday last
   week" — about 41% less error.
 - **Simulated waste vs. naive ordering at a realistic service level (≈5% lost sales):** ≈87% less
-  waste *and* ≈22% fewer lost sales — waste isn't cut by simply ordering less. (FIFO shelf-life
-  simulator; no public dataset records waste. See the Impact screen for kg, CO2e and meals, with
+  waste *and* ≈26% fewer lost sales — waste isn't cut by simply ordering less. (FIFO shelf-life
+  simulator; no public dataset records waste. Impact (kg, CO2e and meals) is computed with
   cited factors and labeled assumptions.)
 - Replay: 10 challengers trained, 6 promoted, 4 rejected by the promotion rules.
 - Holiday-proximity features cut pre-Easter error from 22.0% to 18.3%; seven discount types cut
@@ -58,7 +60,7 @@ people instead of the bin.
   stage 2 forecasts product demand (Tweedie) plus a P80 quantile model; one feature function shared
   by training and serving, guarded by a feature-schema version.
 - **Stack:** Python/FastAPI; TimescaleDB (Tiger Data) hypertables + a continuous aggregate of
-  forecast error; MongoDB Atlas model cards; React + TypeScript + Recharts; one Docker image on
+  forecast error; React + TypeScript + Recharts; one Docker image on
   Vultr behind a .tech domain.
 
 ## Impact factors (cited)
@@ -91,9 +93,9 @@ heuristic with the store's learned response from logged promotion experiments.
 ## Honesty notes
 Waste, inventory and impact are simulated/derived and labeled. Rohlik is an online grocer, so
 warehouses stand in for stores. The replay is a backtest, not live customers. AI tools: Gemini
-(briefing text), ElevenLabs (voice), Cursor (code review), Claude (development assistance); the
+(store chat and briefing text), Cursor (code review), Claude (development assistance); the
 forecasting, governance and data pipeline are ours.
 
 ## Built with
-python, fastapi, xgboost, pandas, timescaledb, tiger-data, postgresql, mongodb-atlas, react,
-typescript, recharts, open-meteo, gemini, elevenlabs, backboard, vultr, docker, .tech
+python, fastapi, xgboost, pandas, timescaledb, tiger-data, postgresql, react,
+typescript, recharts, open-meteo, gemini, backboard, vultr, docker, .tech

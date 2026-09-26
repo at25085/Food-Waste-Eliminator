@@ -3,8 +3,9 @@ import { postJSON, qs, useApi, ApiError } from "../api";
 import type { LiveWeather, MarkdownStep, PromotionExperiment, RecItem, Recommendations, Store, WasteRisk } from "../types";
 import { Panel, RiskBadge, StateBlock, Sticker, StoreLabel, WeatherGlyph } from "../components/ui";
 import StorePicker from "../components/StorePicker";
+import { categoryLabel } from "../chartTheme";
 import { useToast } from "../components/toast";
-import { day, int, isNum, num, shortDay, spct, weatherText } from "../format";
+import { day, fahrenheit, inches, int, isNum, mph, num, shortDay, spct, weatherText } from "../format";
 
 const RISK_ORDER: Record<WasteRisk, number> = { high: 0, watch: 1, low: 2 };
 type SortKey = "risk" | "name" | "category" | "p50" | "p80" | "order_qty" | "on_hand" | "expiring_tomorrow" | "markdown" | "plan";
@@ -188,7 +189,7 @@ export default function Today(props: { stores: Store[]; store: string | null; se
           <span className="honesty__tag">Donate</span>
           {int(data.donations.units)} last-day units won't clear even after markdown — route them to a food-recovery
           partner: about {int(data.donations.meals)} meals' worth, {num(data.donations.co2e_kg, 0)} kg CO₂e kept out of
-          landfill (assumed unit weights; see Impact).
+          landfill (assumed unit weights).
         </p>
       )}
 
@@ -234,20 +235,19 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                 <dd className="wxline">
                   <WeatherGlyph code={data.weather.weather_code} />
                   <span>
-                    <strong>{weatherText(data.weather.weather_code)}</strong>, {num(data.weather.weather_temperature_max, 0)}° /{" "}
-                    {num(data.weather.weather_temperature_min, 0)}°C, {num(data.weather.weather_precipitation_sum, 1)} mm
-                    {isNum(data.weather.weather_wind_speed_max) && <>, wind {num(data.weather.weather_wind_speed_max, 0)} km/h</>}
+                    <strong>{weatherText(data.weather.weather_code)}</strong>, {fahrenheit(data.weather.weather_temperature_max)} /{" "}
+                    {fahrenheit(data.weather.weather_temperature_min)}, {inches(data.weather.weather_precipitation_sum)} rain
+                    {isNum(data.weather.weather_wind_speed_max) && <>, wind {mph(data.weather.weather_wind_speed_max)}</>}
                   </span>
                 </dd>
-                <span className="facts__note">Open-Meteo forecast issued the day before (previous-runs D+1), not observed weather.</span>
               </div>
             </dl>
           )}
         </Panel>
 
         <Panel
-          title="Live Open-Meteo forecast"
-          sub={live.data ? `${live.data.city}, next 7 days. Fetched ${new Date(live.data.fetched_at).toLocaleString()}` : "Next 7 days"}
+          title={live.data ? `${live.data.city} weather` : "Weather"}
+          sub="Next 7 days"
         >
           {live.error || !live.data ? (
             <StateBlock compact loading={live.loading} error={live.error} onRetry={live.reload} />
@@ -258,20 +258,16 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                   <span className="wxstrip__day">{day(d.date, { year: false }).split(" ").slice(0, 2).join(" ")}</span>
                   <WeatherGlyph code={d.weather_code} size={26} />
                   <span className="wxstrip__t">
-                    <strong>{num(d.weather_temperature_max, 0)}°</strong> {num(d.weather_temperature_min, 0)}°
+                    <strong>{fahrenheit(d.weather_temperature_max)}</strong> {fahrenheit(d.weather_temperature_min)}
                   </span>
                   <span className="wxstrip__p">
-                    {num(d.weather_precipitation_sum, 1)} mm
+                    {inches(d.weather_precipitation_sum)}
                     {isNum(d.precipitation_probability_max) && <> · {d.precipitation_probability_max}%</>}
                   </span>
                 </li>
               ))}
             </ol>
           )}
-          <p className="note">
-            Live weather feeds predictions automatically once a store's sales feed is current; this demo store's history ends{" "}
-            {data?.as_of ?? "2024-06-02"}, so today's plan uses the forecast issued that day.
-          </p>
         </Panel>
       </div>
 
@@ -289,8 +285,8 @@ export default function Today(props: { stores: Store[]; store: string | null; se
               aria-valuetext={`Waste costs ${wcr.toFixed(2)} times price`}
             />
             <div className="policy__ends">
-              <span>Waste is cheap: order more</span>
-              <span>Waste is costly: order less</span>
+              <span>Order more</span>
+              <span>Order less</span>
             </div>
           </div>
           <div className="policy__readout">
@@ -314,10 +310,6 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                   {deltas.total > 0 ? "▲" : "▼"} {int(Math.abs(deltas.total))} vs. {deltas.from.toFixed(2)}×
                 </span>
               )}
-            </div>
-            <div className="kpi">
-              <span className="kpi__v">{int(totals.p50)}</span>
-              <span className="kpi__l">units forecast (P50)</span>
             </div>
             <div className="kpi">
               <span className="kpi__v">{int(totals.expiring)}</span>
@@ -348,7 +340,7 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                 </button>
                 {categories.map(([c, n]) => (
                   <button key={c} className={`chipbtn ${category === c ? "is-on" : ""}`} onClick={() => setCategory(c)}>
-                    {c} <span className="chipbtn__n">{n}</span>
+                    {categoryLabel(c)} <span className="chipbtn__n">{n}</span>
                   </button>
                 ))}
               </div>
@@ -400,7 +392,7 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                 <tr>
                   {header("name", "Item", "")}
                   {header("category", "Category", "")}
-                  {header("p50", "Forecast P50")}
+                  {header("p50", "Forecast")}
                   {header("p80", "P80")}
                   {header("order_qty", "Order")}
                   {header("on_hand", "On hand")}
@@ -422,7 +414,7 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                         <span className="item__name">{i.name ?? `Product ${i.product_id}`}</span>
                         <span className="item__id">#{i.product_id}</span>
                       </td>
-                      <td className="cat">{i.category}</td>
+                      <td className="cat">{categoryLabel(i.category)}</td>
                       <td className="num">{num(i.p50, 1)}</td>
                       <td className="num muted">{num(i.p80, 1)}</td>
                       <td className="num order">
@@ -551,40 +543,38 @@ function PromotionPanel({ promos, items }: { promos: ReturnType<typeof useApi<Pr
 interface BriefingResp {
   text: string;
   provider: string;
-  voice_available: boolean;
 }
 
-/** Morning briefing: an LLM rephrases the computed plan (it is given facts, not asked to invent
- *  them); ElevenLabs reads it aloud when configured. */
+/** Four short bullets written from the computed plan; each opens the ledger behind it. */
 function Briefing({ store }: { store: string }) {
   const [refresh, setRefresh] = useState(0);
   const b = useApi<BriefingResp>(`/api/stores/${encodeURIComponent(store)}/briefing${qs({ refresh: refresh ? "true" : undefined, n: refresh || undefined })}`);
-  const [playing, setPlaying] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  function play() {
-    audioRef.current?.pause();
-    const a = new Audio(`/api/stores/${encodeURIComponent(store)}/briefing/audio`);
-    audioRef.current = a;
-    setPlaying(true);
-    a.onended = a.onerror = () => setPlaying(false);
-    a.play().catch(() => setPlaying(false));
-  }
+  const bullets = (b.data?.text ?? "")
+    .split("\n")
+    .map((l) => l.replace(/^\s*[-•*]\s*/, "").trim())
+    .filter(Boolean)
+    .slice(0, 4);
 
   return (
     <Panel
       title="Morning briefing"
-      sub={b.data ? `Written by ${b.data.provider} from the computed plan — it may rephrase, never add numbers` : undefined}
       aside={
-        <div style={{ display: "flex", gap: 8 }}>
-          {b.data?.voice_available && (
-            <button className="btn btn--small" onClick={play} disabled={playing}>{playing ? "Playing…" : "▶ Listen"}</button>
-          )}
-          <button className="btn btn--small" onClick={() => setRefresh((n) => n + 1)} disabled={b.loading}>Regenerate</button>
-        </div>
+        <button className="btn btn--sm" onClick={() => setRefresh((n) => n + 1)} disabled={b.loading}>
+          Regenerate
+        </button>
       }
     >
-      {!b.data ? <StateBlock compact loading={b.loading} error={b.error} onRetry={b.reload} /> : <p className="briefing">{b.data.text}</p>}
+      {!b.data ? (
+        <StateBlock compact loading={b.loading} error={b.error} onRetry={b.reload} />
+      ) : (
+        <ul className="briefing">
+          {bullets.map((t, k) => (
+            <li key={k}>
+              <a href="#/ledger">{t}</a>
+            </li>
+          ))}
+        </ul>
+      )}
     </Panel>
   );
 }

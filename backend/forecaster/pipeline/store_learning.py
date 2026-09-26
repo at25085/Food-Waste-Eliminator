@@ -345,6 +345,8 @@ def forecast_next_day(engine, store_id: str) -> pd.DataFrame:
 
     now = _now()
     with engine.begin() as conn:
+        from forecaster.pipeline.train_production import replace_ungraded
+        replace_ungraded(conn, [store_id], tomorrow.date())
         existing = {r[0] for r in conn.execute(select(S.predictions.c.product_id).where(
             (S.predictions.c.context == "production") & (S.predictions.c.store_id == store_id)
             & (S.predictions.c.forecast_date == tomorrow.date())))}

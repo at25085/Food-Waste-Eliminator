@@ -1,12 +1,11 @@
-# WasteLess (working name — rename before submission)
+# Freshora
 
 Keeps fresh food out of the bin. Perishable-demand forecasting for grocers that **acts** on its
 predictions (order quantities net of stock on the shelf, waste-risk alerts, markdowns, donation of
 what a markdown won't clear) and **learns** whether they were right through a governed
 champion/challenger loop. HackGT 13 — main track: **A Marina's Mission (Social Good)**.
 
-> "Wasteless" is an existing company (wasteless.com) selling AI markdowns to grocers. The display
-> name is one setting (`APP_DISPLAY_NAME` in `backend/.env`); the code package is `forecaster`.
+> The display name is one setting (`APP_DISPLAY_NAME`, default "Freshora"); the code package is `forecaster`.
 
 ## What is real and what is simulated
 
@@ -26,9 +25,10 @@ All numbers are generated files, not hand-typed:
 | Measure | Value |
 |---|---|
 | Replay WAPE, 2024-01-20 → 2024-06-02 (with weekly governed retraining) | **14.4%** vs 24.2% same-weekday-last-week (~41% less error) |
-| Production holdout WAPE, 2024-05-06 → 2024-06-02 | **14.2%** vs 22.5% last-week, 21.8% 28-day mean (37% less error); bias −3.9%; P80 coverage 79% |
-| Simulated waste vs naive ordering (same rule, ~5% lost-sales service level) | ≈87% less waste **and** ≈22% fewer lost sales |
-| Store learning (sample store, one global model) | 25.3% → 11.3% error on the store's unseen fortnight; existing stores 4.5% better |
+| Production holdout WAPE, 2024-05-06 → 2024-06-02, real series (`demand_v7`) | **14.4%** vs 22.5% last-week, 21.8% 28-day mean (36% less error); bias -3.2%; P80 coverage 79% |
+| Synthetic Dairy/Eggs (generated, reported separately) | 83.9% / 84.4% accurate vs 70.7% last-week; noise calibrated to real bakery staples — says the model handles them, not how real stores behave |
+| Simulated waste vs naive ordering (same rule, ~5% lost-sales service level) | ≈87% less waste **and** ≈26% fewer lost sales |
+| Store learning (sample store, one global model, earlier model generation) | 25.3% → 11.3% error on the store's unseen fortnight; existing stores 4.5% better |
 | Replay governance | 10 challengers: 6 promoted, 4 rejected |
 | Measured & rejected | stockout censoring, produce specialist, per-store calibration, spike weights; weather gives no gain at D+1 |
 
@@ -63,9 +63,7 @@ competitions (`autogluon/fev_datasets` on HuggingFace). Weather responses are ca
 | Integration | Enable with | Role |
 |---|---|---|
 | TimescaleDB / Tiger Data | `DATABASE_URL` (Tiger Cloud) or `docker compose up -d` (port 5442) | Hypertables + continuous aggregate of forecast error |
-| MongoDB Atlas | `MONGODB_URI`, then `python -m forecaster.db.model_cards` | Model cards |
-| Gemini | `GEMINI_API_KEY` | Morning briefing text |
-| ElevenLabs | `ELEVENLABS_API_KEY` | Briefing audio |
+| Gemini | `GEMINI_API_KEY` | "Ask about your store" chat and the morning briefing (Flash-Lite, 2.5 Flash fallback) |
 | Backboard | `BACKBOARD_API_KEY` | Manager-note memory |
 | Write lock | `API_TOKEN` | Required bearer token on every write endpoint (set before deploying) |
 
@@ -77,6 +75,12 @@ DATABASE_URL=$PG PYTHONPATH=. .venv/Scripts/python -m forecaster.db.timescale
 ```
 
 Deployment on Vultr + .tech: [docs/DEPLOY_VULTR.md](docs/DEPLOY_VULTR.md).
+
+## Frontend
+
+`frontend/` (React + Vite) uses the team's design (originally an Express/EJS mock-up with
+hardcoded products). Every number on it now comes from the API: Dashboard, Today's plan,
+Upload (add a store by city name; one drag-and-drop box for daily and delivery sheets), Ledger, About, and a chat launcher in the corner.
 
 ## Docs
 

@@ -1,24 +1,41 @@
 """Central settings. Everything tunable lives here so policy is explicit and reviewable."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=(REPO_ROOT / ".env", REPO_ROOT / "backend" / ".env"), extra="ignore")
+    # Blank lines in .env (KEY=) mean "not set", so placeholders fall back to the defaults below.
+    # FORECASTER_NO_DOTENV=1 (tests) ignores .env files so no real keys or databases are ever used.
+    model_config = SettingsConfigDict(
+        env_file=() if os.environ.get("FORECASTER_NO_DOTENV") else (REPO_ROOT / ".env", REPO_ROOT / "backend" / ".env"),
+        extra="ignore", env_ignore_empty=True)
 
-    app_display_name: str = "WasteLess"  # working name; rename before submission (see docs)
+    app_display_name: str = "Freshora"
 
     data_dir: Path = REPO_ROOT / "data"
     artifacts_dir: Path = REPO_ROOT / "artifacts"
     database_url: str = f"sqlite:///{(REPO_ROOT / 'artifacts' / 'forecaster.db').as_posix()}"
 
+    @field_validator("database_url")
+    @classmethod
+    def _psycopg_driver(cls, v: str) -> str:
+        """Accept the connection string exactly as Tiger Cloud shows it (postgres://…)."""
+        for prefix in ("postgres://", "postgresql://"):
+            if v.startswith(prefix):
+                return "postgresql+psycopg://" + v[len(prefix):]
+        return v
+
     # Write protection: when set, every mutating endpoint requires "Authorization: Bearer <token>"
     api_token: str | None = None
+    # Retrain automatically after an upload once a store has enough new days (off in tests).
+    auto_retrain: bool = True
     max_upload_bytes: int = 5 * 1024 * 1024
 
     # Stage-1 traffic forecast as a demand-model input. Measured (architecture_study.json): removing
@@ -35,7 +52,8 @@ class Settings(BaseSettings):
     bias_warning_threshold: float = 0.05
 
     # Inventory simulator / decisions
-    shelf_life_days: dict[str, int] = {"Fruit and vegetable": 3, "Bakery": 2, "Meat and fish": 4}
+    shelf_life_days: dict[str, int] = {"Fruit and vegetable": 3, "Bakery": 2, "Meat and fish": 4,
+                                       "Dairy products": 10, "Eggs": 21}
     # waste cost per unit as a fraction of price. 0.1 → critical ratio 0.75: the operating point where
     # both policies keep lost sales near 5% (policy_study.json); 0.5 ran the store at ~13% stockouts.
     default_waste_cost_ratio: float = 0.1
@@ -43,20 +61,17 @@ class Settings(BaseSettings):
     # Open-Meteo
     open_meteo_timeout_s: float = 60.0
 
-    # Optional MongoDB Atlas model-card store
-    mongodb_uri: str | None = None
-    mongodb_db: str = "forecaster"
-
     # Optional Backboard persistent memory for the manager assistant
     backboard_api_key: str | None = None
     backboard_base_url: str = "https://app.backboard.io/api"
 
     # Optional AI integrations (read from backend/.env; the app runs without them)
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-3.5-flash"
-    elevenlabs_api_key: str | None = None
-    elevenlabs_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
-    elevenlabs_model: str = "eleven_flash_v2_5"
+    # The briefing only rewords computed facts, so a small fast model is enough. Measured on a real
+    # store's facts: 3.5-flash-lite 1.5-1.9 s; 3.5-flash 12 s, and 503 "high demand" at times.
+    gemini_model: str = "gemini-3.5-flash-lite"
+    gemini_fallback_model: str = "gemini-2.5-flash"  # tried if the first fails; then the template
+    gemini_timeout_s: float = 20.0
 
 
 settings = Settings()

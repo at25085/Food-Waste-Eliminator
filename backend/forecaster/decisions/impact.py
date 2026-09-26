@@ -23,7 +23,8 @@ MEALS_SOURCE = "https://refed.org/food-waste/the-problem/"
 HIERARCHY_SOURCE = "https://www.epa.gov/sustainable-management-food/food-recovery-hierarchy"  # EPA Wasted Food Scale
 
 # ASSUMPTION (not in the data): average weight of one sales unit, by category.
-ASSUMED_KG_PER_UNIT = {"Fruit and vegetable": 0.4, "Bakery": 0.1, "Meat and fish": 0.4}
+ASSUMED_KG_PER_UNIT = {"Fruit and vegetable": 0.4, "Bakery": 0.1, "Meat and fish": 0.4,
+                       "Dairy products": 0.5, "Eggs": 0.7}  # eggs: a 12-egg carton
 
 
 def units_to_impact(units_by_category: dict[str, float]) -> dict:

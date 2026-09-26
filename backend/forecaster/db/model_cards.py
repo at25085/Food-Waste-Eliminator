@@ -1,11 +1,6 @@
-"""Model cards in MongoDB Atlas: one self-contained document per model version.
-
-The time-series ledger (predictions, outcomes, rolling error) lives in PostgreSQL/TimescaleDB,
-where joins and window aggregates belong. A model card is naturally a nested document — training
-range, parameters, feature schema, feature importance, the champion-vs-challenger evaluation with
-per-category checks, and the promotion decision — so it lives in a document store.
-
-    python -m forecaster.db.model_cards      # (re)build cards for every version, upsert to Atlas
+"""Model cards: one self-contained summary per model version — training range, parameters,
+feature schema, feature importance, the champion-vs-challenger evaluation with per-category checks,
+and the promotion decision — assembled on request from the database and each model's meta.json.
 """
 from __future__ import annotations
 
@@ -65,25 +60,3 @@ def build_cards(engine, only: str | None = None) -> list[dict]:
             "created_at": v["created_at"],
         }))
     return cards
-
-
-def collection():
-    from pymongo import MongoClient
-    if not settings.mongodb_uri:
-        return None
-    return MongoClient(settings.mongodb_uri, serverSelectionTimeoutMS=5000)[settings.mongodb_db]["model_cards"]
-
-
-def sync(engine=None) -> int:
-    coll = collection()
-    if coll is None:
-        raise SystemExit("set MONGODB_URI in backend/.env")
-    cards = build_cards(engine or get_engine())
-    for c in cards:
-        coll.replace_one({"_id": c["_id"]}, c, upsert=True)
-    coll.create_index([("context", 1), ("status", 1)])
-    return len(cards)
-
-
-if __name__ == "__main__":
-    print(f"upserted {sync()} model cards")

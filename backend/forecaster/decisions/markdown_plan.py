@@ -119,6 +119,33 @@ def plan(cohorts: list[tuple[float, int]], daily_demand: float, price: float = 1
     return p
 
 
+@dataclass
+class ClearAll:
+    discount: float | None  # lowest level that sells every unit before expiry; None if even the deepest doesn't
+    money_vs_no_action: float | None  # money at that level minus doing nothing (negative = worse than letting it spoil)
+    waste_at_deepest: float  # units still spoiling at the deepest level (when discount is None)
+
+
+def lowest_clearing_discount(cohorts: list[tuple[float, int]], daily_demand: float, price: float = 1.0,
+                             lift_at: dict[float, float] | None = None, cost_ratio: float = COST_RATIO,
+                             disposal_ratio: float = DISPOSAL_RATIO, tolerance: float = 0.5) -> ClearAll | None:
+    """The owner's question "what's the smallest discount at which it all still sells?": each level is
+    started on the first plan day (the most selling days, so the shallowest depth) and kept until the
+    stock expires, using the model's predicted sales at that discount. None when nothing would spoil."""
+    lift = monotone(lift_at or DEFAULT_LIFT)
+    cohorts = [(u, d) for u, d in cohorts if u > 1e-9 and d >= 1]
+    if not cohorts or sum(u for u, _ in project_unsold(cohorts, daily_demand)) <= tolerance:
+        return None
+    horizon = max(d for _, d in cohorts)
+    base, _, _ = _simulate(cohorts, daily_demand, price, 0.0, 0, horizon, lift, cost_ratio, disposal_ratio)
+    waste = 0.0
+    for d in LEVELS:
+        m, waste, _ = _simulate(cohorts, daily_demand, price, d, 0, horizon, lift, cost_ratio, disposal_ratio)
+        if waste <= tolerance:
+            return ClearAll(discount=d, money_vs_no_action=m - base, waste_at_deepest=0.0)
+    return ClearAll(discount=None, money_vs_no_action=None, waste_at_deepest=waste)
+
+
 def describe(p: Plan, name: str, dates: list[str], currency: str = "") -> str:
     """Human sentence for the plan, e.g. for the briefing and the CSV."""
     if p.surplus_units <= 0:

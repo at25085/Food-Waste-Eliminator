@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from forecaster.config import STORE_LOCATIONS, settings
-from forecaster.data import rohlik
+from forecaster.data import rohlik, synthetic
 from forecaster.data.validation import validate_observations
 from forecaster.features.build import complete_daily_index
 from forecaster.weather import open_meteo as om
@@ -55,7 +55,11 @@ def prepare(per_store: int = 120, force: bool = False) -> dict[str, pd.DataFrame
     out = processed_dir()
     paths = {k: out / f"{k}.parquet" for k in ("panel", "weather", "traffic", "quarantine")}
     if not force and all(p.exists() for p in paths.values()):
-        return {k: pd.read_parquet(p) for k, p in paths.items()}
+        frames = {k: pd.read_parquet(p) for k, p in paths.items()}
+        if not frames["panel"]["series_id"].astype(str).str.startswith(synthetic.SYNTHETIC_PREFIX).any():
+            frames["panel"] = synthetic.ensure(frames["panel"])  # add the synthetic Dairy/Eggs series once
+            frames["panel"].to_parquet(paths["panel"], index=False)
+        return frames
 
     rohlik.download()
     sales = rohlik.load_sales()
@@ -65,7 +69,7 @@ def prepare(per_store: int = 120, force: bool = False) -> dict[str, pd.DataFrame
     keys = select_series(sales, per_store)
     sales = sales[(sales["store_id"] + "|" + sales["product_id"]).isin(set(keys))]
     clean, quarantine = validate_observations(sales)
-    panel = complete_daily_index(clean)
+    panel = synthetic.ensure(complete_daily_index(clean))
     weather = store_weather(HISTORY_START.date(), DATA_END.date())
 
     frames = {"panel": panel, "weather": weather, "traffic": traffic, "quarantine": quarantine}

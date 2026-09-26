@@ -7,7 +7,7 @@ SERVER="${1:?usage: deploy_vultr.sh user@server}"
 DEST=/opt/forecaster
 cd "$(dirname "$0")/.."
 [ -f backend/.env ] || { echo "backend/.env missing"; exit 1; }
-grep -q "^DATABASE_URL=postgresql" backend/.env || { echo "DATABASE_URL (Tiger Cloud) must be set — otherwise the server would start on an empty local database"; exit 1; }
+grep -q "^DATABASE_URL=postgres" backend/.env || { echo "DATABASE_URL (Tiger Cloud) must be set — otherwise the server would start on an empty local database"; exit 1; }
 grep -q '^API_TOKEN=.\+' backend/.env || echo "WARNING: API_TOKEN not set — write endpoints will be open to anyone"
 
 ssh "$SERVER" "command -v docker >/dev/null || curl -fsSL https://get.docker.com | sh; mkdir -p $DEST"

@@ -51,6 +51,8 @@ generated files in `artifacts/` unless noted.
 | Store-specific models vs one model. | Switched to **one global model**: a store's uploads retrain it, and it is promoted only if it is better for that store **and** no worse for the existing stores. |
 | A later retrain would have dropped earlier stores' uploads. | Every retrain now includes every store's uploaded sheets. |
 | "Learned from this store" showed yes before any retraining. | It compared dates; it now reads the model's actual training record. |
+| **Tomorrow's forecast was served without its traffic inputs.** Found while wiring the new dashboard's "customers per day" card, which showed a dash. | Traffic features were built only up to the last *observed* day, so tomorrow's row (whose lags and rolling means are already known) got blanks. Training and backtests were unaffected; only served plans were. The model had been trained with traffic dropout, so the damage was small (≈1% per store), but it was real. Fixed at the source, with a regression test, then tomorrow was re-planned with the same champion. |
+| Every retrain re-planned tomorrow on top of the old forecasts: 4 model versions' forecasts for the same day. | A re-plan now replaces that day's forecasts that have no outcome yet; graded ones are never touched. |
 | Stockout days make sales look lower than demand. | Detected from the sheets (shelf ended empty after selling everything on hand) and fed to the model's in-stock inputs. |
 
 ## Engineering
@@ -63,6 +65,11 @@ generated files in `artifacts/` unless noted.
 | Docker image was 3.3 GB. | XGBoost's Linux wheel pulled CUDA libraries a CPU server never uses → `xgboost-cpu`; the image dropped to 1.1 GB. Then learned uploads need the model files on the server → models and training data go on a persistent volume. |
 | TimescaleDB refused to turn tables with ID keys into hypertables. | Hypertables need the time column in every unique key: observations use natural keys (store, product, date); graded forecasts are copied into a dedicated `forecast_errors` hypertable with a continuous aggregate. |
 | Re-copying data into Postgres failed on foreign keys. | Clear child tables before parents, then copy parents before children. |
+| **First live test on Tiger Cloud: the briefing timed out (>120 s).** | The database answered in 0.08 s; the time was the transfer (the free tier measured ~170 KB/s from the laptop) of all ~102k backtest forecasts, downloaded to compute one 14-day error. Every ledger read now filters, limits and sums in SQL; results were checked identical to the old pandas path (to 1e-13). |
+| After copying into Postgres, a rollback said "done" but the dashboard still showed the old champion. | Copied rows kept their ids but Postgres' id sequences didn't move, so the new row got id 1 and "latest by id" picked the old champion (and later inserts would have collided). The copy now advances every sequence. |
+| An owner chat can quietly invent figures, and prompts alone don't stop it. | Every number in a chat reply is matched against the data it was given (rounding and % allowed); unmatched figures trigger one rewrite, then a visible warning. Building the check also caught our own bug: CSV commas were being read as thousands separators. |
+| Gemini 3.5 Flash took 12–22 s per briefing and sometimes returned 503 "high demand". | The briefing only rewords computed numbers: switched to 3.5 Flash-Lite (1.5–2 s), with 2.5 Flash as a fallback and the template as the last resort. |
+| The copy script read its *source* from `DATABASE_URL`, which by then points at Postgres; tests would have picked up real keys from `.env`. | The copy always reads the local SQLite file; tests set `FORECASTER_NO_DOTENV=1` and never read `.env`. |
 
 ## Research and strategy
 
@@ -72,6 +79,17 @@ generated files in `artifacts/` unless noted.
 | Most ideas we researched already existed — six of eleven had been shipped or built at hackathons within months. | Novelty comes from the combination and the rigor (a visible, governed learning loop on real data), not the category. |
 | Confused sponsor challenges with main tracks. | One main track (A Marina's Mission); Meta/Visa/etc. are separate challenges that stack on top. |
 | Web-search budget ran out mid-research. | Fell back to direct page fetches, Devpost/GitHub/arXiv/HN — and said so in the report. |
+
+## Round 3: demo chain, new categories, UI rebuild
+
+| Struggle | What we learned / did |
+|---|---|
+| The team wanted Dairy and Eggs; the dataset has neither. | Generated them (driven by each warehouse's real customer counts and calendar, with promotions and noise), labeled them synthetic, and kept them **out of the headline accuracy** — accuracy on data you generated proves nothing. Real-series error after retraining: 14.4% vs 22.5% last-week. |
+| Dairy/eggs stuck at 74% accurate after retraining. | Measured the ceiling: a forecaster that knew the true expected demand scored only ~75%, so the model was already at the limit set by our generator's noise, which was 5× noisier than real staples (overdispersion 1/12 vs ≤1/62 measured on real bakery residuals). Calibrated the noise to the measured bakery level (not to a target): 83.9% dairy, 84.4% eggs. Measure the ceiling before tuning a model. |
+| Georgia stores with no Georgia data. | A demo chain that replays real warehouses' sales at Georgia locations through the normal upload path, one day at a time, so every forecast in the Ledger was saved before its day's sales. Holidays follow the source warehouse's calendar, because that is what the sales followed. |
+| Two screens restyled each other. | The new dashboard reused the `.kpis` class of Today's plan (and `.notes` of the manager-notes list); the overrides also caused the "extra gap" the team noticed. Unique class names fixed both. |
+| One upload box for two kinds of sheet. | Detect the sheet by its header (expiry/batch columns → delivery sheet). The first version read the file with the daily-sheet parser, which fails on delivery columns and silently routed them to the wrong importer; a test caught it. |
+| Owners type categories their own way. | "Dairy", "Fruits and vegetables", "Meat & fish" are mapped to the model's names before validation instead of being rejected. |
 
 ## What we'd tell the next team
 1. Measure everything against a simple baseline; most clever ideas don't beat it.
