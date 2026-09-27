@@ -14,10 +14,12 @@ ssh "$SERVER" "command -v docker >/dev/null || curl -fsSL https://get.docker.com
 # code (the image builds the frontend and installs Python deps on the server)
 tar --exclude='./frontend/node_modules' --exclude='./backend/.venv' --exclude='./data' --exclude='./artifacts' \
     --exclude='./.git' --exclude='**/__pycache__' -czf - . | ssh "$SERVER" "tar -xzf - -C $DEST"
-# served models only (production demand_v*), plans, reports; not the 1.6 GB of backtest binaries
-tar -czf - artifacts/models/demand_v* artifacts/*.json artifacts/*.parquet artifacts/store_recs 2>/dev/null \
+# the serving model only (newest production version, or MODEL=demand_vN), plus plans and reports.
+# Retrains on the server add their own versions next to it.
+MODEL="${MODEL:-$(ls -d artifacts/models/demand_v* | sed 's#.*/##' | sort -V | tail -1)}"
+echo "uploading model $MODEL"
+tar -czf - "artifacts/models/$MODEL" artifacts/*.json artifacts/*.parquet artifacts/store_recs 2>/dev/null \
     | ssh "$SERVER" "tar -xzf - -C $DEST"
-tar -czf - --exclude='artifacts/models/replay_v*/*.ubj' artifacts/models/replay_v* | ssh "$SERVER" "tar -xzf - -C $DEST"
 tar -czf - data/processed data/cache | ssh "$SERVER" "tar -xzf - -C $DEST"
 ssh "$SERVER" "cd $DEST && docker compose -f docker-compose.prod.yml up -d --build && docker compose -f docker-compose.prod.yml ps"
 echo "Deployed. If DOMAIN is set, point its A record at the server IP; HTTPS is automatic."
