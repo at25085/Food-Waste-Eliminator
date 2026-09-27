@@ -25,9 +25,10 @@ All numbers are generated files, not hand-typed:
 | Measure | Value |
 |---|---|
 | Replay WAPE, 2024-01-20 → 2024-06-02 (with weekly governed retraining) | **14.4%** vs 24.2% same-weekday-last-week (~41% less error) |
-| Production holdout WAPE, 2024-05-06 → 2024-06-02, real series (`demand_v7`) | **14.4%** vs 22.5% last-week, 21.8% 28-day mean (36% less error); bias -3.2%; P80 coverage 79% |
-| Synthetic Dairy/Eggs (generated, reported separately) | 83.9% / 84.4% accurate vs 70.7% last-week; noise calibrated to real bakery staples — says the model handles them, not how real stores behave |
+| Production holdout WAPE, 2024-05-06 → 2024-06-02, real series (`demand_v9`) | **14.1%** vs 22.5% last-week, 21.8% 28-day mean (37% less error); bias -3.7%; P80 coverage 79% |
+| Synthetic Dairy/Eggs (generated, reported separately) | 83.9% / 84.3% accurate vs 70.7% last-week; noise calibrated to real bakery staples — says the model handles them, not how real stores behave |
 | Simulated waste vs naive ordering (same rule, ~5% lost-sales service level) | ≈87% less waste **and** ≈26% fewer lost sales |
+| Demo chain, live forecasts (4 weeks, one upload per day) | Atlanta 84.8%, Augusta 83.6%, Macon 81.7% accurate |
 | Store learning (sample store, one global model, earlier model generation) | 25.3% → 11.3% error on the store's unseen fortnight; existing stores 4.5% better |
 | Replay governance | 10 challengers: 6 promoted, 4 rejected |
 | Measured & rejected | stockout censoring, produce specialist, per-store calibration, spike weights; weather gives no gain at D+1 |
