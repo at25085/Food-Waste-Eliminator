@@ -8,6 +8,7 @@ import StoreData from "./screens/StoreData";
 import Overview from "./screens/Overview";
 import About from "./screens/About";
 import ChatWidget from "./components/ChatWidget";
+import { placeName } from "./format";
 
 type Route = "overview" | "today" | "data" | "ledger" | "about";
 const ROUTES: { id: Route; label: string; hint: string }[] = [
@@ -116,7 +117,7 @@ export default function App() {
           {route === "ledger" && <Ledger stores={storeList} store={store} />}
           {route === "about" && <About name={name} />}
         </main>
-        <ChatWidget store={store} storeName={storeList.find((s) => s.store_id === store)?.city ?? null} />
+        <ChatWidget store={store} storeName={placeName(storeList.find((s) => s.store_id === store)) || null} />
       </div>
     </ToastHost>
   );

@@ -4,7 +4,7 @@ import type { BatchUploadResult, DailyUploadResult, Store, StoreIn } from "../ty
 import { AccessCode, Panel } from "../components/ui";
 import StorePicker from "../components/StorePicker";
 import { useToast } from "../components/toast";
-import { day, int, isNum, reasonHint, reasonText, spct, wape } from "../format";
+import { day, placeName, int, isNum, reasonHint, reasonText, spct, wape } from "../format";
 
 const enc = encodeURIComponent;
 
@@ -32,7 +32,7 @@ export default function StoreData(props: {
       <header className="screen__head">
         <div>
           <h1 className="display">Upload</h1>
-          <p className="screen__lede">{info ? `${info.city}` : "Pick a store"}</p>
+          <p className="screen__lede">{info ? placeName(info) : "Pick a store"}</p>
         </div>
         <StorePicker stores={stores} value={store} onChange={setStore} />
       </header>

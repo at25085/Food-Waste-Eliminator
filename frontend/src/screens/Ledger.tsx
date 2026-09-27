@@ -5,7 +5,7 @@ import { Pager, Panel, StateBlock } from "../components/ui";
 
 const PAGE = 50;
 import { categoryLabel } from "../chartTheme";
-import { day, isNum, num, wape } from "../format";
+import { day, isNum, num, placeName, wape } from "../format";
 
 /** Every forecast, saved before the sales happened, next to what actually sold. */
 /** How far the forecast was from what sold, as a share of what sold (e.g. "+8%" = forecast 8% high). */
@@ -55,7 +55,7 @@ export default function Ledger({ stores, store: selected }: { stores: Store[]; s
 
       <Panel
         flush
-        title={stores.find((s) => s.store_id === store)?.city ?? "Forecasts"}
+        title={placeName(stores.find((s) => s.store_id === store)) || "Forecasts"}
         sub={
           q.data
             ? `Forecasts with their sales, newest first; this page off by ${wape(summary.wape)}${

@@ -4,7 +4,7 @@ import type { LiveWeather, MarkdownStep, RecItem, Recommendations, Store, WasteR
 import { Pager, Panel, RiskBadge, StateBlock, WeatherGlyph } from "../components/ui";
 import StorePicker from "../components/StorePicker";
 import { categoryLabel } from "../chartTheme";
-import { day, fahrenheit, inches, int, isNum, mph, num, shortDay, weatherText } from "../format";
+import { day, placeName, fahrenheit, inches, int, isNum, mph, num, shortDay, weatherText } from "../format";
 
 const RISK_ORDER: Record<WasteRisk, number> = { high: 0, watch: 1, low: 2 };
 type SortKey = "risk" | "name" | "category" | "p50" | "p80" | "order_qty" | "on_hand" | "expiring_tomorrow" | "markdown" | "plan";
@@ -122,7 +122,7 @@ export default function Today(props: { stores: Store[]; store: string | null; se
         <div>
           <h1 className="display">Tomorrow's order plan</h1>
           <p className="screen__lede">
-            {storeInfo ? `${storeInfo.store_id.replace("_", " ")}, ${storeInfo.city}` : "Pick a store"}
+            {storeInfo ? placeName(storeInfo) : "Pick a store"}
             {data?.forecast_date && (
               <>
                 {" "}
