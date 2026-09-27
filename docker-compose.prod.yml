@@ -20,7 +20,14 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    command: caddy reverse-proxy --from ${DOMAIN:-:80} --to app:8000
+    # DOMAIN (from backend/.env) set: HTTPS for DOMAIN and www.DOMAIN; unset: plain HTTP on port 80.
+    command:
+      - sh
+      - -c
+      - |
+        if [ -n "$$DOMAIN" ]; then SITE="$$DOMAIN, www.$$DOMAIN"; else SITE=":80"; fi
+        printf '%s {\n\treverse_proxy app:8000\n}\n' "$$SITE" > /etc/caddy/Caddyfile
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     volumes:
       - caddy_data:/data
     depends_on:
