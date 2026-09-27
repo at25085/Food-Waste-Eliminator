@@ -31,7 +31,7 @@ Rohlik is a Czech online grocer. Its public Kaggle competition data is mirrored 
 | `rohlik_orders_1D` | warehouse × day | 7 warehouses; `orders`, holidays, shutdowns, **`precipitation`, `snow`** (dataset weather), user activity; 2020-12-05 → 2024-03-15 |
 
 Training "stores" = the seven Rohlik warehouses (Prague_1/2/3, Brno_1, Budapest_1, Munich_1, Frankfurt_1), hidden
-in the UI. The dashboard shows a demo chain — **Atlanta, Macon, Augusta** — each replaying one warehouse's real sales
+in the UI. The dashboard shows a demo chain — **Atlanta, Macon, Augusta** — each replaying one of the three largest warehouses' (Brno_1, Budapest_1, Prague_1) real sales
 at a Georgia location through the normal upload path (`pipeline/make_demo_chain.py`). The Rohlik data has no dairy
 or eggs, so **Dairy products** and **Eggs** series are synthetic (`data/synthetic.py`: driven by each warehouse's
 real daily customer counts and calendar, with promotions and noise); headline accuracy is measured on real series only.

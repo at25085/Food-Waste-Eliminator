@@ -174,8 +174,8 @@ export default function About({ name }: { name?: string }) {
         <h3>Data and credits</h3>
         <ul>
           <li>
-            Sales history: the Rohlik Group grocery dataset (Kaggle). The Atlanta, Macon and Augusta demo stores replay three of
-            its warehouses' real sales at Georgia locations; their deliveries and waste are simulated.
+            Sales history: the Rohlik Group grocery dataset (Kaggle). The Atlanta, Macon and Augusta demo stores replay the real sales of its
+            three largest warehouses at Georgia locations; their deliveries and waste are simulated.
           </li>
           <li>Dairy and egg products are synthetic: generated from each store's real daily customer counts to fill a gap in the data.</li>
           <li>

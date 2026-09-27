@@ -3,9 +3,16 @@ import { qs, useApi } from "../api";
 import type { LedgerRow, Recommendations, Store } from "../types";
 import { Panel, StateBlock } from "../components/ui";
 import { categoryLabel } from "../chartTheme";
-import { isNum, num, wape } from "../format";
+import { day, isNum, num, wape } from "../format";
 
 /** Every forecast, saved before the sales happened, next to what actually sold. */
+/** How far the forecast was from what sold, as a share of what sold (e.g. "+8%" = forecast 8% high). */
+function pctDiff(pred: number, actual: number): string {
+  if (actual <= 0) return pred > 0.5 ? "over" : "0%";
+  const d = Math.round(((pred - actual) / actual) * 100);
+  return `${d > 0 ? "+" : ""}${d}%`;
+}
+
 export default function Ledger({ stores, store: selected }: { stores: Store[]; store: string | null }) {
   const [store, setStore] = useState(selected ?? "");
   const [productInput, setProductInput] = useState("");
@@ -19,7 +26,8 @@ export default function Ledger({ stores, store: selected }: { stores: Store[]; s
   }, [productInput]);
 
   const shown = store || stores.map((s) => s.store_id).join(",");
-  const q = useApi<LedgerRow[]>(store ? `/api/ledger${qs({ context: "production", store, product: product || undefined, limit })}` : null);
+  const q = useApi<LedgerRow[]>(store ? `/api/ledger${qs({ context: "production", store, product: product || undefined, limit, graded: "true" })}` : null);
+  const pending = useApi<{ count: number; forecast_date: string | null }>(store ? `/api/ledger/pending${qs({ context: "production", store })}` : null);
   const recs = useApi<Recommendations>(store ? `/api/stores/${encodeURIComponent(store)}/recommendations` : null);
   const names = useMemo(() => new Map((recs.data?.items ?? []).map((i) => [i.product_id, i.name ?? i.product_id])), [recs.data]);
   const rows = q.data ?? [];
@@ -45,7 +53,9 @@ export default function Ledger({ stores, store: selected }: { stores: Store[]; s
         title={stores.find((s) => s.store_id === store)?.city ?? "Forecasts"}
         sub={
           q.data
-            ? `${summary.n} most recent forecasts${summary.withOutcome ? `, ${summary.withOutcome} with sales in (error ${wape(summary.wape)})` : ""}`
+            ? `${summary.n} most recent forecasts with their sales, off by ${wape(summary.wape)} overall${
+                pending.data?.count ? ` · ${pending.data.count} forecasts for ${day(pending.data.forecast_date)} are waiting for that day's sales` : ""
+              }`
             : undefined
         }
         aside={
@@ -85,6 +95,7 @@ export default function Ledger({ stores, store: selected }: { stores: Store[]; s
                   <th>Product</th>
                   <th className="num">Predicted</th>
                   <th className="num">Actual</th>
+                  <th className="num">Difference</th>
                 </tr>
               </thead>
               <tbody>
@@ -101,6 +112,9 @@ export default function Ledger({ stores, store: selected }: { stores: Store[]; s
                       </td>
                       <td className="num">{num(r.predicted_units, 0)}</td>
                       <td className="num">{has ? num(r.actual_units_sold, 0) : <span className="pending">not in yet</span>}</td>
+                      <td className={`num ${has ? (r.predicted_units > (r.actual_units_sold ?? 0) ? "err--over" : "err--under") : ""}`}>
+                        {has ? pctDiff(r.predicted_units, r.actual_units_sold ?? 0) : "–"}
+                      </td>
                     </tr>
                   );
                 })}

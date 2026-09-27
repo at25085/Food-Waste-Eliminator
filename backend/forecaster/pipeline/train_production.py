@@ -27,7 +27,7 @@ from forecaster.data.prepare import processed_dir
 from forecaster.db import schema as S
 from forecaster.db.schema import create_all, get_engine
 from forecaster.decisions.policy import compare_policies, simulate_policy
-from forecaster.features.build import FEATURE_SCHEMA_VERSION, WEATHER, build_features
+from forecaster.features.build import CATEGORICAL, FEATURE_SCHEMA_VERSION, WEATHER, build_features
 from forecaster.models import demand, registry
 from forecaster.models import traffic as stage1
 from forecaster.models.metrics import by_segment, summarize
@@ -72,6 +72,26 @@ def replace_ungraded(conn, store_ids: list[str], forecast_date) -> int:
         (S.predictions.c.context == "production") & S.predictions.c.store_id.in_(store_ids)
         & (S.predictions.c.forecast_date == forecast_date) & S.predictions.c.prediction_id.not_in(graded)))
     return res.rowcount or 0
+
+
+def with_uploaded_history(engine, rows: pd.DataFrame, cutoff: pd.Timestamp, log=print) -> tuple[pd.DataFrame, list[str]]:
+    """Onboarding: every uploading store's own history up to the cutoff joins the training rows, so
+    the global model knows those stores (features built exactly as they will be at serving time).
+    Nothing after the cutoff is added: the holdout and any later uploaded days stay unseen."""
+    from forecaster.pipeline.store_learning import store_features, uploading_stores
+    extra = []
+    for store in uploading_stores(engine):
+        f = store_features(engine, store, with_next_day=False)
+        f = demand.training_rows(f[f["date"] <= cutoff]) if len(f) else f
+        if len(f):
+            extra.append(f)
+    if not extra:
+        return rows, []
+    ex = pd.concat(extra, ignore_index=True)
+    for c in CATEGORICAL:
+        rows[c], ex[c] = rows[c].astype(str), ex[c].astype(str)
+    log(f"onboarding: +{len(ex)} rows of uploaded history from {sorted(ex['store_id'].unique())} (up to {cutoff.date()})")
+    return pd.concat([rows, ex], ignore_index=True), sorted(ex["store_id"].unique())
 
 
 def plan_existing_stores(engine, cand, version: str, log=print) -> pd.DataFrame:
@@ -184,6 +204,7 @@ def main() -> None:
     rows = demand.training_rows(feat, excluded_days(engine))
     end = rows["date"].max()
     cutoff = end - pd.Timedelta(days=HOLDOUT_DAYS)
+    rows, onboarded = with_uploaded_history(engine, rows, cutoff, log)
     cand = lifecycle.train_candidate(rows, cutoff, TRAIN_START)
     hold = rows[rows["date"] > cutoff].copy()
     hold["pred"] = cand.predict(hold)
@@ -208,12 +229,16 @@ def main() -> None:
         f"naive {test['seasonal_naive_7']['wape']:.3f}); P80 coverage {p80_cov:.2f}")
 
     # Weather ablation — measured, reported whichever way it goes.
-    cand_nw = lifecycle.train_candidate(rows, cutoff, TRAIN_START, exclude=tuple(WEATHER))
-    test["pred_no_weather"] = summarize(cand_nw.predict(hold), hold["sales"])  # real series only
-    log(f"weather ablation: with {test['pred']['wape']:.4f} vs without {test['pred_no_weather']['wape']:.4f}")
+    if "--skip-weather-ablation" in sys.argv:  # measured on every earlier run: weather gives no gain
+        test["pred_no_weather"] = None
+    else:
+        cand_nw = lifecycle.train_candidate(rows, cutoff, TRAIN_START, exclude=tuple(WEATHER))
+        test["pred_no_weather"] = summarize(cand_nw.predict(hold), hold["sales"])  # real series only
+        log(f"weather ablation: with {test['pred']['wape']:.4f} vs without {test['pred_no_weather']['wape']:.4f}")
 
     version = registry.next_version()
     registry.save(version, cand.booster, {**cand.meta, "context": "production", "train_metrics": cand.train_metrics,
+                                          "trained_with_uploads_from": onboarded or None,
                                           "test_metrics": test["pred"], "holdout": [str((cutoff + pd.Timedelta(days=1)).date()), str(end.date())],
                                           "p80_coverage": p80_cov}, lifecycle.extra_models(cand))
     with engine.begin() as conn:

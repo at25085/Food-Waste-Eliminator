@@ -311,3 +311,17 @@ def test_auto_retrain_needs_eligibility_and_a_week_between_runs(seeded, monkeypa
     assert api._should_auto_retrain("Brno_1", {"retrain_eligible": True, "last_day": "2026-09-24"})  # a week later
     monkeypatch.setattr(api.settings, "auto_retrain", False)
     assert not api._should_auto_retrain("Brno_1", {"retrain_eligible": True, "last_day": "2026-09-24"})
+
+
+def test_ledger_shows_graded_forecasts_and_counts_pending(seeded):
+    now = datetime.now(timezone.utc)
+    with api.engine.begin() as conn:
+        for pid, d in [("lg_done", date(2026, 9, 1)), ("lg_wait", date(2026, 9, 2))]:
+            conn.execute(insert(S.predictions).values(
+                prediction_id=pid, context="production", store_id="Frankfurt_1", product_id="lgx", category="Bakery",
+                prediction_created_at=now, forecast_date=d, horizon=1, predicted_units=10.0, p80_units=12.0,
+                weather_forecast={}, expected_customers=None, model_version="demand_v2", feature_schema_version="fs_test"))
+        conn.execute(insert(S.outcomes).values(prediction_id="lg_done", actual_units_sold=9.0, observed_at=now))
+    rows = client.get("/api/ledger", params={"context": "production", "store": "Frankfurt_1", "product": "lgx", "graded": "true"}).json()
+    assert [r["prediction_id"] for r in rows] == ["lg_done"] and rows[0]["actual_units_sold"] == 9.0
+    assert client.get("/api/ledger/pending", params={"store": "Frankfurt_1"}).json()["count"] >= 1

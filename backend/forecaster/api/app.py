@@ -60,12 +60,16 @@ def _ledger_filters(context: str, store: str | None = None, product: str | None 
 
 
 def _ledger_rows(context: str, store: str | None = None, product: str | None = None, limit: int | None = None,
-                 with_weather: bool = False) -> pd.DataFrame:
-    """Predictions joined with outcomes, newest first; the weather JSON only when asked for."""
+                 with_weather: bool = False, graded: bool | None = None) -> pd.DataFrame:
+    """Predictions joined with outcomes, newest first; the weather JSON only when asked for.
+    graded=True: only forecasts whose sales are in; False: only those still waiting."""
     cols = [c for c in _P.c if with_weather or c.name != "weather_forecast"]
+    where = _ledger_filters(context, store, product)
+    if graded is not None:
+        where.append(_O.c.actual_units_sold.is_not(None) if graded else _O.c.prediction_id.is_(None))
     q = (select(*cols, _O.c.actual_units_sold, _O.c.actual_customer_count, _O.c.waste_units, _O.c.observed_at)
          .select_from(_P.outerjoin(_O, _P.c.prediction_id == _O.c.prediction_id))
-         .where(*_ledger_filters(context, store, product)).order_by(_P.c.forecast_date.desc()))
+         .where(*where).order_by(_P.c.forecast_date.desc(), _P.c.store_id, _P.c.product_id))
     if limit:
         q = q.limit(limit)
     with engine.connect() as conn:
@@ -297,11 +301,23 @@ def metrics_timeseries(context: str = "replay", store: str | None = None):
 
 
 @app.get("/api/ledger")
-def ledger(context: str = "replay", store: str | None = None, product: str | None = None, limit: int = 200):
-    df = _ledger_rows(context, store, product, limit=limit, with_weather=True)
+def ledger(context: str = "replay", store: str | None = None, product: str | None = None, limit: int = 200,
+           graded: bool | None = None):
+    df = _ledger_rows(context, store, product, limit=limit, with_weather=True, graded=graded)
     df["forecast_date"] = df["forecast_date"].dt.strftime("%Y-%m-%d")
     df["error"] = df["predicted_units"] - df["actual_units_sold"]
     return df.replace({np.nan: None}).to_dict("records")
+
+
+@app.get("/api/ledger/pending")
+def ledger_pending(context: str = "production", store: str | None = None) -> dict:
+    """How many forecasts are still waiting for their day's sales, and for which date."""
+    q = (select(func.count(), func.max(_P.c.forecast_date))
+         .select_from(_P.outerjoin(_O, _P.c.prediction_id == _O.c.prediction_id))
+         .where(*_ledger_filters(context, store), _O.c.prediction_id.is_(None)))
+    with engine.connect() as conn:
+        n, d = conn.execute(q).first()
+    return {"count": int(n or 0), "forecast_date": str(d)[:10] if d else None}
 
 
 @app.get("/api/stores/{store_id}/recommendations")
