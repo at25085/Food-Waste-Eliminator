@@ -311,13 +311,16 @@ def ledger(context: str = "replay", store: str | None = None, product: str | Non
 
 @app.get("/api/ledger/pending")
 def ledger_pending(context: str = "production", store: str | None = None) -> dict:
-    """How many forecasts are still waiting for their day's sales, and for which date."""
-    q = (select(func.count(), func.max(_P.c.forecast_date))
-         .select_from(_P.outerjoin(_O, _P.c.prediction_id == _O.c.prediction_id))
-         .where(*_ledger_filters(context, store), _O.c.prediction_id.is_(None)))
+    """How many forecasts for the latest forecast day are still waiting for that day's sales. (Older
+    forecasts without an outcome are products missing from that day's sheet, not pending.)"""
+    base = _P.outerjoin(_O, _P.c.prediction_id == _O.c.prediction_id)
     with engine.connect() as conn:
-        n, d = conn.execute(q).first()
-    return {"count": int(n or 0), "forecast_date": str(d)[:10] if d else None}
+        d = conn.execute(select(func.max(_P.c.forecast_date)).where(*_ledger_filters(context, store))).scalar()
+        if d is None:
+            return {"count": 0, "forecast_date": None}
+        n = conn.execute(select(func.count()).select_from(base).where(
+            *_ledger_filters(context, store), _P.c.forecast_date == d, _O.c.prediction_id.is_(None))).scalar()
+    return {"count": int(n or 0), "forecast_date": str(d)[:10]}
 
 
 @app.get("/api/stores/{store_id}/recommendations")
