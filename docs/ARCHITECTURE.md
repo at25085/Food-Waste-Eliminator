@@ -306,18 +306,5 @@ light-grey page, green brand, top navigation). Screens:
 | A Marina's Mission (main track, Social Good) | Less fresh food wasted: right-sized orders, profitable markdowns, donation of what's left | — |
 | TimescaleDB / Tiger Data | Ledger-derived `forecast_errors` hypertable + `daily_forecast_error` continuous aggregate; `observations` and `traffic_observations` hypertables | Time-series facts, rolling windows, incremental aggregation |
 | Gemini | "Ask about your store" chat and the morning briefing, both answered only from the store's own data pack (plan, sell-through, accuracy, notes, and per product the lowest discount at which the model predicts everything sells before expiry, next to the most profitable plan); every number in a chat reply is checked against that data, with one correction round and a visible warning if a figure still can't be matched | Language layer only — every number comes from the model and the owner's sheets |
-| Backboard | Persistent per-store memory of manager notes (events, standing orders, overrides) | What the manager knows that the data doesn't; informs the briefing, never changes forecasts |
+| Backboard (optional, not in the current UI) | Per-store memory of manager notes; the notes screen was removed, the API remains | — |
 | Vultr + .tech | One container serving API + dashboard at a public URL | Judges can open it; writes locked with `API_TOKEN` |
-| Cursor | Code review during development (documented for SpaceXAI) | Development tool, not a runtime dependency |
-
-## 10. Build plan (4 people, to Sunday 12:00 EDT)
-
-| Person | Scope |
-|---|---|
-| A — data & weather | download, validation, Open-Meteo client + cache + cross-check, `build_features` |
-| B — models & loop | stage 1/2 training, baselines, registry, retrain + promotion, replay |
-| C — backend | DB schema, ledger, metrics, ingestion endpoints, API |
-| D — frontend & demo | dashboard screens, demo script, Devpost write-up |
-
-Order of work: bootstrap model with honest test WAPE (Sat AM) → API + ledger (Sat PM) → replay +
-Model Health (Sat night) → polish and demo rehearsal (Sun AM).

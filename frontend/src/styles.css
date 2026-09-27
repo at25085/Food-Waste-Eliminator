@@ -2844,3 +2844,45 @@ p.upload__facts {
   gap: 6px;
   line-height: 1.55;
 }
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line-2);
+}
+.pager__info {
+  margin-right: auto;
+  color: var(--ink-3);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.pager__page {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  min-width: 90px;
+  text-align: center;
+}
+
+.accesscode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid #fcd34d;
+  background: #fffbeb;
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+.accesscode input {
+  flex: 1;
+  min-width: 180px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}

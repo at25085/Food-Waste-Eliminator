@@ -2,7 +2,13 @@
 data/raw/
 data/cache/
 data/processed/
-artifacts/
+# artifacts: everything except the small result reports the README links to
+artifacts/*
+!artifacts/production_report.json
+!artifacts/replay_summary.json
+!artifacts/accuracy_experiments.json
+!artifacts/architecture_study.json
+!artifacts/policy_study.json
 *.parquet
 # python
 __pycache__/

@@ -53,13 +53,6 @@ const STEPS = [
   },
 ];
 
-const STACK: { group: string; items: string[] }[] = [
-  { group: "Frontend", items: ["React 19", "TypeScript", "Vite", "Recharts"] },
-  { group: "AI & ML", items: ["XGBoost", "pandas & NumPy", "Gemini (store chat + briefing)", "Backboard (manager memory)"] },
-  { group: "Backend & data", items: ["Python 3.14", "FastAPI", "SQLAlchemy 2", "Tiger Cloud: Postgres + TimescaleDB"] },
-  { group: "DevOps & data sources", items: ["Docker", "Caddy (HTTPS)", "Vultr", "pytest", "Open-Meteo weather", "Rohlik sales data (Kaggle)"] },
-];
-
 /** The team's About page, with sourced statistics and the system's own measured numbers. */
 export default function About({ name }: { name?: string }) {
   const impact = useApi<ImpactResp>("/api/impact");
@@ -152,36 +145,6 @@ export default function About({ name }: { name?: string }) {
             </li>
           ))}
         </ol>
-      </section>
-
-      <section className="panel about__card">
-        <h3>Technology</h3>
-        <div className="about__stack">
-          {STACK.map((g) => (
-            <div key={g.group}>
-              <h4>{g.group}</h4>
-              <ul>
-                {g.items.map((i) => (
-                  <li key={i}>{i}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="panel about__card about__credits">
-        <h3>Data and credits</h3>
-        <ul>
-          <li>
-            Sales history: the Rohlik Group grocery dataset (Kaggle). The Atlanta, Macon and Augusta demo stores replay the real sales of its
-            three largest warehouses at Georgia locations; their deliveries and waste are simulated.
-          </li>
-          <li>Dairy and egg products are synthetic: generated from each store's real daily customer counts to fill a gap in the data.</li>
-          <li>
-            Weather data by <a href="https://open-meteo.com" target="_blank" rel="noreferrer">Open-Meteo.com</a> (CC BY 4.0).
-          </li>
-        </ul>
       </section>
     </div>
   );

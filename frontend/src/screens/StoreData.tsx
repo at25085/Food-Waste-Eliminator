@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { postFile, postJSON, ApiError } from "../api";
 import type { BatchUploadResult, DailyUploadResult, Store, StoreIn } from "../types";
-import { Panel } from "../components/ui";
+import { AccessCode, Panel } from "../components/ui";
 import StorePicker from "../components/StorePicker";
 import { useToast } from "../components/toast";
 import { day, int, isNum, reasonHint, reasonText, spct, wape } from "../format";
@@ -79,6 +79,7 @@ function CreateStore({ onCreated }: { onCreated: (id: string) => void }) {
   const [f, setF] = useState(EMPTY_STORE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [locked, setLocked] = useState(false);
   const toast = useToast();
   const set = (k: keyof typeof EMPTY_STORE) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }));
 
@@ -98,7 +99,8 @@ function CreateStore({ onCreated }: { onCreated: (id: string) => void }) {
       setOpen(false);
       onCreated(r.store_id);
     } catch (err) {
-      setError((err as ApiError).message);
+      if ((err as ApiError).status === 401) setLocked(true);
+      else setError((err as ApiError).message);
     } finally {
       setBusy(false);
     }
@@ -114,6 +116,7 @@ function CreateStore({ onCreated }: { onCreated: (id: string) => void }) {
       }
       className={open ? undefined : "panel--collapsed"}
     >
+      {open && locked && <AccessCode onSaved={() => setLocked(false)} />}
       {open && (
         <form className="formgrid formgrid--store" onSubmit={submit}>
           <Field label="Store name">
@@ -170,6 +173,7 @@ function SheetUpload<R>(props: {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<R | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [locked, setLocked] = useState(false);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -191,13 +195,16 @@ function SheetUpload<R>(props: {
       if (inputRef.current) inputRef.current.value = "";
       props.onDone();
     } catch (err) {
-      setError((err as ApiError).message);
+      if ((err as ApiError).status === 401) setLocked(true);
+      else setError((err as ApiError).message);
     } finally {
       setBusy(false);
     }
   }
 
   return (
+    <>
+    {locked && <AccessCode onSaved={() => setLocked(false)} />}
     <form className="upload upload--flat" onSubmit={submit}>
       <label
         className={`dropzone ${dragging ? "is-drag" : ""} ${file ? "has-file" : ""} ${!props.endpoint ? "is-off" : ""}`}
@@ -248,6 +255,7 @@ function SheetUpload<R>(props: {
       )}
       {result && props.render(result)}
     </form>
+    </>
   );
 }
 

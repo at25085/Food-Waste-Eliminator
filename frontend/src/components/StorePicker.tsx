@@ -24,7 +24,7 @@ export default function StorePicker(props: {
             aria-checked={value === s.store_id}
             className={`storepick__opt ${value === s.store_id ? "is-on" : ""}`}
             onClick={() => onChange(s.store_id)}
-            title={`${s.store_id} (${s.city})${s.label ? ` — ${s.label}` : ""}`}
+            title={s.city}
           >
             <span className="storepick__id">{s.store_id.replace(/_/g, " ")}</span>
           </button>

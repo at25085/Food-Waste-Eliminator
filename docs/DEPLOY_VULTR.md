@@ -49,7 +49,7 @@ the server. Re-run the same command to redeploy; the volumes (models, plans) are
 python scripts/e2e_check.py https://yourname.tech --token "$API_TOKEN"      # add --retrain for the slow part
 ```
 Creates a test store `E2E_Test`, uploads the sample sheets, and checks plans, CSVs, Timescale,
-Backboard, Gemini (briefing + store chat), model cards and the write lock (PASS/FAIL per step). It writes to the
+Gemini (briefing + store chat), model cards and the write lock (PASS/FAIL per step). It writes to the
 database, so reset afterwards by re-running step 3.
 
 ## Checks after deploy

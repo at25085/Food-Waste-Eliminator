@@ -13,29 +13,33 @@ champion/challenger loop. HackGT 13 — main track: **A Marina's Mission (Social
 
 | Real | Simulated / derived / labeled |
 |---|---|
-| Daily product sales, prices, seven discount types, availability — Rohlik (Czech e-grocer), 7 warehouses, perishables only, 2020–2024 | Inventory and waste (no public dataset records waste): FIFO shelf-life simulator |
-| Customer traffic: each warehouse's real daily order count | The "stores" are Rohlik warehouses (an online grocer); ~109 sampled fresh products per store |
-| Open-Meteo weather: archived forecasts (training), forecasts issued the day before (2024 replay), live forecast (serving) | The Jan–Jun 2024 replay is a **backtest**, never presented as live customers |
+| Daily product sales, prices, seven discount types, availability — Rohlik (Czech e-grocer), 7 warehouses, fresh Bakery / Fruit and vegetables / Meat and fish, 2021–2024 | Inventory and waste (no public dataset records waste): FIFO shelf-life simulator |
+| Customer traffic: each warehouse's real daily order count | **Dairy and Eggs** series are synthetic (the dataset has none): driven by each warehouse's real customer counts and calendar; reported separately |
+| Open-Meteo weather: archived forecasts (training), live forecast (serving) | The **Atlanta, Macon, Augusta demo stores** replay the three largest warehouses' real sales at Georgia locations, 121 weeks later (weekdays kept), so the plan is for 2026-09-27 |
 | | kg / CO2e / meals use cited factors (WRAP, ReFED) and **assumed** unit weights |
 
-## Measured results (data the model never trained on)
+## Measured results
 
-All numbers are generated files, not hand-typed:
-[`artifacts/production_report.json`](artifacts/production_report.json) (`headline`),
-`artifacts/replay_summary.json`, `artifacts/accuracy_experiments.json`, `artifacts/policy_study.json`.
+Headline: the **production holdout** — the served model (`demand_v10`) on the last four weeks of real
+sales it never trained on (2024-05-06 → 2024-06-02, 7 warehouses, real products only). All numbers come
+from generated files: [`artifacts/production_report.json`](artifacts/production_report.json) (`headline`),
+[`artifacts/replay_summary.json`](artifacts/replay_summary.json),
+[`artifacts/accuracy_experiments.json`](artifacts/accuracy_experiments.json),
+[`artifacts/architecture_study.json`](artifacts/architecture_study.json),
+[`artifacts/policy_study.json`](artifacts/policy_study.json).
 
 | Measure | Value |
 |---|---|
-| Replay WAPE, 2024-01-20 → 2024-06-02 (with weekly governed retraining) | **14.4%** vs 24.2% same-weekday-last-week (~41% less error) |
-| Production holdout WAPE, 2024-05-06 → 2024-06-02, real series (`demand_v9`) | **14.1%** vs 22.5% last-week, 21.8% 28-day mean (37% less error); bias -3.7%; P80 coverage 79% |
-| Synthetic Dairy/Eggs (generated, reported separately) | 83.9% / 84.3% accurate vs 70.7% last-week; noise calibrated to real bakery staples — says the model handles them, not how real stores behave |
-| Simulated waste vs naive ordering (same rule, ~5% lost-sales service level) | ≈87% less waste **and** ≈26% fewer lost sales |
-| Demo chain, live forecasts (4 weeks, one upload per day) | Atlanta 84.8%, Augusta 83.6%, Macon 81.7% accurate |
-| Store learning (sample store, one global model, earlier model generation) | 25.3% → 11.3% error on the store's unseen fortnight; existing stores 4.5% better |
-| Replay governance | 10 challengers: 6 promoted, 4 rejected |
-| Measured & rejected | stockout censoring, produce specialist, per-store calibration, spike weights; weather gives no gain at D+1 |
+| **Production holdout** (headline), real products | **13.7% WAPE (86.3% accurate)** vs 22.5% same-weekday-last-week (39% less error) and 21.8% 28-day mean; bias −3.3%; P80 coverage 80% |
+| By category (same holdout) | Bakery 88.8%, Fruit and vegetables 83.6%, Meat and fish 77.0% accurate |
+| Synthetic Dairy / Eggs (same holdout, reported separately) | 84.0% / 84.0% accurate vs 70.7% last-week — shows the model handles them, not how real stores behave |
+| Demo stores, live forecasts (4 weeks, one upload per day; each forecast saved before its day's sales) | Atlanta 86.6%, Augusta 85.1%, Macon 80.7% accurate |
+| Simulated waste vs naive ordering (same rule, ~5% lost-sales service level) | ≈87% less waste **and** ≈34% fewer lost sales |
+| **Replay backtest** (earlier model generation, 2024-01-20 → 2024-06-02, weekly governed retraining) | 14.4% WAPE vs 24.2% same-weekday-last-week; 10 challengers: 6 promoted, 4 rejected |
+| Measured & rejected | stockout censoring, produce specialist, per-store calibration, spike weights, one multi-quantile model; weather gives no gain one day ahead |
 
-WAPE = Σ|pred − actual| / Σ actual. If "accuracy" is quoted it means 1 − WAPE (≈86% by volume).
+WAPE = Σ|pred − actual| / Σ actual; "accuracy" = 1 − WAPE, by volume. The replay and the holdout are
+different tests (different periods and baselines) — don't mix their numbers.
 Struggles and what we learned: [docs/LESSONS.md](docs/LESSONS.md).
 
 ## Run it
@@ -67,7 +71,7 @@ competitions (`autogluon/fev_datasets` on HuggingFace). Weather responses are ca
 |---|---|---|
 | TimescaleDB / Tiger Data | `DATABASE_URL` (Tiger Cloud) or `docker compose up -d` (port 5442) | Hypertables + continuous aggregate of forecast error |
 | Gemini | `GEMINI_API_KEY` | "Ask about your store" chat and the morning briefing (Flash-Lite, 2.5 Flash fallback) |
-| Backboard | `BACKBOARD_API_KEY` | Manager-note memory |
+| Backboard | `BACKBOARD_API_KEY` | Manager-note memory (API only; not in the current UI) |
 | Write lock | `API_TOKEN` | Required bearer token on every write endpoint (set before deploying) |
 
 ```bash
@@ -95,10 +99,9 @@ Upload (add a store by city name; one drag-and-drop box for daily and delivery s
 
 ## Docs
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — feature path, two-stage model, ledger, validation,
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — feature path, the demand model (P50 + P80), ledger, validation,
   promotion rules, rollback, replay, measured changes, integrations
 - [docs/DEMO.md](docs/DEMO.md) — 2.5-minute demo script and judge Q&A
 - [docs/DEVPOST.md](docs/DEVPOST.md) — submission draft
-- [docs/SPONSOR_OPTIONS.md](docs/SPONSOR_OPTIONS.md) — Visa "Last Call" and Meta "Community Table" designs
 
 Weather data by [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0).

@@ -77,7 +77,7 @@ generated files in `artifacts/` unless noted.
 |---|---|
 | The name "WasteLess" belongs to a funded company selling AI markdowns to grocers. | Rename before submission. |
 | Most ideas we researched already existed — six of eleven had been shipped or built at hackathons within months. | Novelty comes from the combination and the rigor (a visible, governed learning loop on real data), not the category. |
-| Confused sponsor challenges with main tracks. | One main track (A Marina's Mission); Meta/Visa/etc. are separate challenges that stack on top. |
+| Confused sponsor challenges with main tracks. | One main track (A Marina's Mission); sponsor challenges are separate and only worth tagging if actually built. |
 | Web-search budget ran out mid-research. | Fell back to direct page fetches, Devpost/GitHub/arXiv/HN — and said so in the report. |
 
 ## Round 3: demo chain, new categories, UI rebuild

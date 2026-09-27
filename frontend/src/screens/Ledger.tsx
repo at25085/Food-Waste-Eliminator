@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { qs, useApi } from "../api";
 import type { LedgerRow, Recommendations, Store } from "../types";
-import { Panel, StateBlock } from "../components/ui";
+import { Pager, Panel, StateBlock } from "../components/ui";
+
+const PAGE = 50;
 import { categoryLabel } from "../chartTheme";
 import { day, isNum, num, wape } from "../format";
 
@@ -17,20 +19,23 @@ export default function Ledger({ stores, store: selected }: { stores: Store[]; s
   const [store, setStore] = useState(selected ?? "");
   const [productInput, setProductInput] = useState("");
   const [product, setProduct] = useState("");
-  const [limit, setLimit] = useState(200);
+  const [page, setPage] = useState(0);
 
   useEffect(() => setStore(selected ?? ""), [selected]);
+  useEffect(() => setPage(0), [store, product]);
   useEffect(() => {
     const t = window.setTimeout(() => setProduct(productInput.trim()), 350);
     return () => window.clearTimeout(t);
   }, [productInput]);
 
   const shown = store || stores.map((s) => s.store_id).join(",");
-  const q = useApi<LedgerRow[]>(store ? `/api/ledger${qs({ context: "production", store, product: product || undefined, limit, graded: "true" })}` : null);
+  // One extra row tells us whether there is a next page.
+  const q = useApi<LedgerRow[]>(store ? `/api/ledger${qs({ context: "production", store, product: product || undefined, limit: PAGE + 1, offset: page * PAGE, graded: "true" })}` : null);
   const pending = useApi<{ count: number; forecast_date: string | null }>(store ? `/api/ledger/pending${qs({ context: "production", store })}` : null);
   const recs = useApi<Recommendations>(store ? `/api/stores/${encodeURIComponent(store)}/recommendations` : null);
   const names = useMemo(() => new Map((recs.data?.items ?? []).map((i) => [i.product_id, i.name ?? i.product_id])), [recs.data]);
-  const rows = q.data ?? [];
+  const rows = (q.data ?? []).slice(0, PAGE);
+  const hasNext = (q.data?.length ?? 0) > PAGE;
 
   const summary = useMemo(() => {
     const done = rows.filter((r) => isNum(r.actual_units_sold));
@@ -53,7 +58,7 @@ export default function Ledger({ stores, store: selected }: { stores: Store[]; s
         title={stores.find((s) => s.store_id === store)?.city ?? "Forecasts"}
         sub={
           q.data
-            ? `${summary.n} most recent forecasts with their sales, off by ${wape(summary.wape)} overall${
+            ? `Forecasts with their sales, newest first; this page off by ${wape(summary.wape)}${
                 pending.data?.count ? ` · ${pending.data.count} forecasts for ${day(pending.data.forecast_date)} are waiting for that day's sales` : ""
               }`
             : undefined
@@ -68,12 +73,6 @@ export default function Ledger({ stores, store: selected }: { stores: Store[]; s
               ))}
             </select>
             <input type="search" placeholder="Product" value={productInput} onChange={(e) => setProductInput(e.target.value)} aria-label="Product id" />
-            <select value={limit} onChange={(e) => setLimit(parseInt(e.target.value, 10))} aria-label="Rows">
-              <option value={100}>100 rows</option>
-              <option value={200}>200 rows</option>
-              <option value={500}>500 rows</option>
-              <option value={1000}>1,000 rows</option>
-            </select>
             <a className="btn btn--sm" href={`/api/ledger.csv${qs({ context: "production", store: store || undefined })}`} download>
               Download CSV
             </a>
@@ -122,6 +121,7 @@ export default function Ledger({ stores, store: selected }: { stores: Store[]; s
             </table>
           </div>
         )}
+        {rows.length > 0 && <Pager page={page} pageSize={PAGE} hasNext={hasNext} onPage={setPage} shown={rows.length} />}
       </Panel>
     </div>
   );

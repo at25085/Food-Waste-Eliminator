@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { postJSON, qs, useApi, ApiError } from "../api";
+import { qs, useApi } from "../api";
 import type { LiveWeather, MarkdownStep, PromotionExperiment, RecItem, Recommendations, Store, WasteRisk } from "../types";
-import { Panel, RiskBadge, StateBlock, Sticker, StoreLabel, WeatherGlyph } from "../components/ui";
+import { Pager, Panel, RiskBadge, StateBlock, Sticker, WeatherGlyph } from "../components/ui";
 import StorePicker from "../components/StorePicker";
 import { categoryLabel } from "../chartTheme";
-import { useToast } from "../components/toast";
 import { day, fahrenheit, inches, int, isNum, mph, num, shortDay, spct, weatherText } from "../format";
 
 const RISK_ORDER: Record<WasteRisk, number> = { high: 0, watch: 1, low: 2 };
 type SortKey = "risk" | "name" | "category" | "p50" | "p80" | "order_qty" | "on_hand" | "expiring_tomorrow" | "markdown" | "plan";
 
+const ITEMS_PER_PAGE = 25;
 const MARGIN_RATIO = 0.3; // mirrors decisions.policy.critical_ratio default (cu)
 
 export default function Today(props: { stores: Store[]; store: string | null; setStore: (s: string) => void }) {
@@ -21,6 +21,7 @@ export default function Today(props: { stores: Store[]; store: string | null; se
   const [risk, setRisk] = useState<"all" | WasteRisk | "markdown">("all");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "risk", dir: 1 });
+  const [page, setPage] = useState(0);
 
   // Debounce the slider so dragging doesn't fire a request per pixel.
   useEffect(() => {
@@ -88,6 +89,7 @@ export default function Today(props: { stores: Store[]; store: string | null; se
       return (x < y ? -1 : x > y ? 1 : 0) * sort.dir;
     });
   }, [data, category, risk, search, sort]);
+  useEffect(() => setPage(0), [store, category, risk, search, sort]);
 
   const totals = useMemo(() => {
     const items = data?.items ?? [];
@@ -103,46 +105,6 @@ export default function Today(props: { stores: Store[]; store: string | null; se
 
   const ratio = MARGIN_RATIO / (MARGIN_RATIO + wcr);
   const storeInfo = props.stores.find((s) => s.store_id === store);
-
-  // Markdown acceptance → promotion experiment.
-  const toast = useToast();
-  const [accepting, setAccepting] = useState<Set<string>>(new Set());
-  const accepted = useMemo(() => {
-    const m = new Map<string, PromotionExperiment>();
-    const fd = data?.forecast_date;
-    for (const p of promos.data ?? []) if (fd && p.start_time.startsWith(fd)) m.set(p.product_id, p);
-    return m;
-  }, [promos.data, data?.forecast_date]);
-
-  async function acceptMarkdown(i: RecItem) {
-    if (!data?.forecast_date) return;
-    setAccepting((s) => new Set(s).add(i.product_id));
-    try {
-      await postJSON<{ experiment_id: string }>("/api/promotions", {
-        store_id: i.store_id,
-        product_id: i.product_id,
-        discount: i.markdown,
-        start_time: `${data.forecast_date}T08:00:00`,
-        end_time: `${data.forecast_date}T20:00:00`,
-        inventory_before: i.on_hand,
-        forecast_without_promotion: i.p50,
-      });
-      toast({
-        kind: "promoted",
-        title: "Experiment recorded — outcome will be measured",
-        body: `${i.name ?? i.product_id}: −${Math.round(i.markdown * 100)}% on ${day(data.forecast_date, { year: false })}, 08:00–20:00.`,
-      });
-      promos.reload();
-    } catch (e) {
-      toast({ kind: "error", title: "Couldn't record the markdown", body: (e as ApiError).message });
-    } finally {
-      setAccepting((s) => {
-        const n = new Set(s);
-        n.delete(i.product_id);
-        return n;
-      });
-    }
-  }
 
   const header = (key: SortKey, label: string, cls = "num") => (
     <th className={cls} aria-sort={sort.key === key ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
@@ -162,7 +124,6 @@ export default function Today(props: { stores: Store[]; store: string | null; se
           <h1 className="display">Tomorrow's order plan</h1>
           <p className="screen__lede">
             {storeInfo ? `${storeInfo.store_id.replace("_", " ")}, ${storeInfo.city}` : "Pick a store"}
-            {storeInfo?.label && <> <StoreLabel store={storeInfo} /></>}
             {data?.forecast_date && (
               <>
                 {" "}
@@ -194,7 +155,6 @@ export default function Today(props: { stores: Store[]; store: string | null; se
       )}
 
       {store && <Briefing store={store} />}
-      {store && <ManagerNotes store={store} />}
 
       <div className="grid-2">
         <Panel title="What this plan is based on" sub="Model inputs for the forecast date">
@@ -247,7 +207,14 @@ export default function Today(props: { stores: Store[]; store: string | null; se
 
         <Panel
           title={live.data ? `${live.data.city} weather` : "Weather"}
-          sub="Next 7 days"
+          sub={
+            <>
+              Next 7 days · Weather by{" "}
+              <a href="https://open-meteo.com" target="_blank" rel="noreferrer">
+                Open-Meteo
+              </a>
+            </>
+          }
         >
           {live.error || !live.data ? (
             <StateBlock compact loading={live.loading} error={live.error} onRetry={live.reload} />
@@ -393,21 +360,17 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                   {header("name", "Item", "")}
                   {header("category", "Category", "")}
                   {header("p50", "Forecast")}
-                  {header("p80", "P80")}
                   {header("order_qty", "Order")}
                   {header("on_hand", "On hand")}
                   {header("expiring_tomorrow", "Expiring tmrw")}
                   {header("risk", "Waste risk", "")}
-                  {header("markdown", "Markdown", "")}
                   {header("plan", "Markdown plan", "")}
                   <th>Surplus plan</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((i) => {
+                {rows.slice(page * ITEMS_PER_PAGE, (page + 1) * ITEMS_PER_PAGE).map((i) => {
                   const d = deltas?.map.get(i.product_id);
-                  const exp = accepted.get(i.product_id);
-                  const later = laterStart(i);
                   return (
                     <tr key={i.product_id} className={`risk-row--${i.waste_risk}`}>
                       <td className="item">
@@ -416,7 +379,6 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                       </td>
                       <td className="cat">{categoryLabel(i.category)}</td>
                       <td className="num">{num(i.p50, 1)}</td>
-                      <td className="num muted">{num(i.p80, 1)}</td>
                       <td className="num order">
                         <span key={`${i.product_id}-${data.waste_cost_ratio}`} className={d ? "flash" : undefined}>
                           {num(i.order_qty, 0)}
@@ -432,24 +394,6 @@ export default function Today(props: { stores: Store[]; store: string | null; se
                       <td>
                         <RiskBadge risk={i.waste_risk} />
                       </td>
-                      <td className="md">
-                        <Sticker depth={i.markdown} />
-                        {later && (
-                          <span className="md__later" title={i.schedule_text ?? undefined}>
-                            from {shortDay(later.date)}
-                          </span>
-                        )}
-                        {i.markdown > 0 &&
-                          (exp ? (
-                            <span className="md__done" title={`Experiment ${exp.experiment_id}`}>
-                              Accepted
-                            </span>
-                          ) : (
-                            <button className="btn btn--xs" disabled={accepting.has(i.product_id)} onClick={() => acceptMarkdown(i)}>
-                              {accepting.has(i.product_id) ? "Saving…" : "Accept"}
-                            </button>
-                          ))}
-                      </td>
                       <td className="mdplan" title={i.schedule_text ?? undefined}>
                         <MarkdownPlan item={i} />
                       </td>
@@ -460,6 +404,10 @@ export default function Today(props: { stores: Store[]; store: string | null; se
               </tbody>
             </table>
           </div>
+        )}
+        {data && rows.length > ITEMS_PER_PAGE && (
+          <Pager page={page} pageSize={ITEMS_PER_PAGE} total={rows.length} onPage={setPage}
+                 shown={Math.min(ITEMS_PER_PAGE, rows.length - page * ITEMS_PER_PAGE)} />
         )}
         {data && (
           <p className="note note--pad">
@@ -484,7 +432,7 @@ function PromotionPanel({ promos, items }: { promos: ReturnType<typeof useApi<Pr
     <Panel
       flush
       title="Promotion experiments"
-      sub="Each accepted markdown is recorded as a structured experiment: discount, window, stock before, and the forecast without the discount. As outcomes arrive, these replace the markdown heuristic with this store's learned response to discounts."
+      sub="Every discount day in the store's sheets is recorded with the forecast without the discount and what actually sold. After about 15 per category, discount plans use this store's measured response."
     >
       {promos.error || promos.loading || !list.length ? (
         <StateBlock
@@ -493,7 +441,7 @@ function PromotionPanel({ promos, items }: { promos: ReturnType<typeof useApi<Pr
           error={promos.error}
           onRetry={promos.reload}
           empty={!list.length}
-          emptyText="No experiments for this store yet. Accept a suggested markdown above to start one."
+          emptyText="No discount days in this store's sheets yet."
         />
       ) : (
         <div className="tablewrap">
@@ -547,8 +495,7 @@ interface BriefingResp {
 
 /** Four short bullets written from the computed plan; each opens the ledger behind it. */
 function Briefing({ store }: { store: string }) {
-  const [refresh, setRefresh] = useState(0);
-  const b = useApi<BriefingResp>(`/api/stores/${encodeURIComponent(store)}/briefing${qs({ refresh: refresh ? "true" : undefined, n: refresh || undefined })}`);
+  const b = useApi<BriefingResp>(`/api/stores/${encodeURIComponent(store)}/briefing`);
   const bullets = (b.data?.text ?? "")
     .split("\n")
     .map((l) => l.replace(/^\s*[-•*]\s*/, "").trim())
@@ -556,14 +503,7 @@ function Briefing({ store }: { store: string }) {
     .slice(0, 4);
 
   return (
-    <Panel
-      title="Morning briefing"
-      aside={
-        <button className="btn btn--sm" onClick={() => setRefresh((n) => n + 1)} disabled={b.loading}>
-          Regenerate
-        </button>
-      }
-    >
+    <Panel title="Morning briefing">
       {!b.data ? (
         <StateBlock compact loading={b.loading} error={b.error} onRetry={b.reload} />
       ) : (
@@ -571,76 +511,6 @@ function Briefing({ store }: { store: string }) {
           {bullets.map((t, k) => (
             <li key={k}>
               <a href="#/ledger">{t}</a>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Panel>
-  );
-}
-
-interface Note {
-  id: number;
-  created_at: string;
-  kind: string;
-  applies_on: string | null;
-  content: string;
-  backboard_memory_id: string | null;
-}
-
-/** What the manager knows that the data doesn't. Stored locally and in Backboard memory; used by
- *  the briefing, never to change forecast numbers. */
-function ManagerNotes({ store }: { store: string }) {
-  const notes = useApi<{ notes: Note[]; backboard: boolean; policy: string }>(`/api/stores/${encodeURIComponent(store)}/notes`);
-  const toast = useToast();
-  const [content, setContent] = useState("");
-  const [kind, setKind] = useState("event");
-  const [appliesOn, setAppliesOn] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  async function save() {
-    if (!content.trim()) return;
-    setSaving(true);
-    try {
-      const r = await postJSON<{ mirrored_to_backboard: boolean; backboard_error: string | null }>(
-        `/api/stores/${encodeURIComponent(store)}/notes`,
-        { content, kind, applies_on: appliesOn || null },
-      );
-      toast({ kind: "info", title: "Note saved", body: r.mirrored_to_backboard ? "Stored in Backboard memory." : r.backboard_error ?? "Stored locally (Backboard not configured)." });
-      setContent("");
-      notes.reload();
-    } catch (e) {
-      toast({ kind: "error", title: "Could not save note", body: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Panel title="Manager notes" sub={notes.data ? `${notes.data.policy}${notes.data.backboard ? " Memory: Backboard." : " Memory: local (Backboard not configured)."}` : undefined}>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-        <input className="input" style={{ flex: "1 1 260px" }} placeholder="e.g. Street festival on Saturday — expect more walk-ins"
-               value={content} onChange={(e) => setContent(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
-        <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}>
-          <option value="event">Local event</option>
-          <option value="preference">Standing preference</option>
-          <option value="override">Override</option>
-        </select>
-        <input className="input" type="date" value={appliesOn} onChange={(e) => setAppliesOn(e.target.value)} aria-label="Applies on (optional)" />
-        <button className="btn" onClick={save} disabled={saving || !content.trim()}>{saving ? "Saving…" : "Add note"}</button>
-      </div>
-      {!notes.data ? (
-        <StateBlock compact loading={notes.loading} error={notes.error} onRetry={notes.reload} />
-      ) : notes.data.notes.length === 0 ? (
-        <StateBlock compact empty emptyText="No notes yet. Tell the assistant what the data can't know." />
-      ) : (
-        <ul className="notes">
-          {notes.data.notes.slice(0, 8).map((n) => (
-            <li key={n.id}>
-              <span className="notes__kind">{n.kind}</span>
-              {n.applies_on && <span className="notes__date">{day(n.applies_on)}</span>}
-              {n.content}
-              {n.backboard_memory_id && <span className="notes__bb" title="Stored in Backboard memory">●</span>}
             </li>
           ))}
         </ul>
@@ -657,18 +527,11 @@ const SURPLUS_LABEL: Record<string, string> = {
   donate: "Donate",
 };
 
-/** Any markdown in the plan, tomorrow or later. */
 function hasMarkdown(i: RecItem): boolean {
   return i.markdown > 0 || (i.markdown_schedule?.length ?? 0) > 0;
 }
 
 /** First markdown step when nothing is discounted tomorrow. */
-function laterStart(i: RecItem): MarkdownStep | undefined {
-  const steps = i.markdown_schedule ?? [];
-  if (!steps.length || i.markdown > 0) return undefined;
-  return [...steps].sort((a, b) => a.date.localeCompare(b.date))[0];
-}
-
 /** Steps for separate shelf cohorts can share a date and depth; show each (date, depth) once. */
 function mergedSteps(steps: MarkdownStep[]): MarkdownStep[] {
   const m = new Map<string, MarkdownStep>();

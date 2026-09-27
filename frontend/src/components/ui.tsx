@@ -1,5 +1,6 @@
+import { useState } from "react";
 import type { ReactNode } from "react";
-import { ApiError } from "../api";
+import { ApiError, setAccessCode } from "../api";
 import type { WasteRisk } from "../types";
 import { weatherKind, weatherText } from "../format";
 
@@ -244,5 +245,54 @@ export function StoreLabel({ store }: { store: { kind?: string | null; label?: s
     <span className={`storelabel storelabel--${store.kind ?? "other"}`} title="Where this store's data comes from">
       {store.label}
     </span>
+  );
+}
+
+/** Previous / next pager. `total` when known (client-side lists); otherwise `hasNext`. */
+export function Pager(props: { page: number; pageSize: number; onPage: (p: number) => void; total?: number; hasNext?: boolean; shown: number }) {
+  const { page, pageSize, total } = props;
+  const pages = total !== undefined ? Math.max(1, Math.ceil(total / pageSize)) : undefined;
+  const hasNext = pages !== undefined ? page < pages - 1 : !!props.hasNext;
+  const first = props.shown ? page * pageSize + 1 : 0;
+  return (
+    <nav className="pager" aria-label="Pages">
+      <span className="pager__info">
+        {first}–{page * pageSize + props.shown}
+        {total !== undefined && ` of ${total}`}
+      </span>
+      <button className="btn btn--sm" onClick={() => props.onPage(page - 1)} disabled={page === 0}>
+        ‹ Previous
+      </button>
+      <span className="pager__page">
+        Page {page + 1}
+        {pages !== undefined && ` of ${pages}`}
+      </span>
+      <button className="btn btn--sm" onClick={() => props.onPage(page + 1)} disabled={!hasNext}>
+        Next ›
+      </button>
+    </nav>
+  );
+}
+
+
+/** Shown when the server refuses a change: asks once for the store access code and keeps it in this browser. */
+export function AccessCode({ onSaved }: { onSaved: () => void }) {
+  const [code, setCode] = useState("");
+  return (
+    <form
+      className="accesscode"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!code.trim()) return;
+        setAccessCode(code);
+        onSaved();
+      }}
+    >
+      <span>Uploading needs the store's access code.</span>
+      <input type="password" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Access code" aria-label="Access code" autoComplete="off" />
+      <button className="btn btn--primary btn--sm" type="submit" disabled={!code.trim()}>
+        Save
+      </button>
+    </form>
   );
 }

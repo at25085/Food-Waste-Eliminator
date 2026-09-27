@@ -32,8 +32,8 @@ what sold, and tomorrow's plan is rebuilt. With enough new days it retrains itse
 only used if it beats the current one on days neither has seen and is no worse for the other stores.
 
 ## 2:10 — Numbers (15 s)
-About page: **14.4% error vs 22.5% for "same as last week"** on four weeks of real sales the model never
-saw (36% less error). Waste is simulated (no public dataset records it) and labeled.
+About page: **13.7% error (86.3% accurate) vs 22.5% for "same as last week"** on four weeks of real sales the model never
+saw (39% less error). Waste is simulated (no public dataset records it) and labeled.
 
 ## 2:25 — Close (5 s)
 "Order right, discount only when it pays, donate the rest — and never trust a model that hasn't proven

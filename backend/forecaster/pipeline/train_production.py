@@ -74,24 +74,27 @@ def replace_ungraded(conn, store_ids: list[str], forecast_date) -> int:
     return res.rowcount or 0
 
 
-def with_uploaded_history(engine, rows: pd.DataFrame, cutoff: pd.Timestamp, log=print) -> tuple[pd.DataFrame, list[str]]:
-    """Onboarding: every uploading store's own history up to the cutoff joins the training rows, so
-    the global model knows those stores (features built exactly as they will be at serving time).
-    Nothing after the cutoff is added: the holdout and any later uploaded days stay unseen."""
+def with_uploaded_history(engine, rows: pd.DataFrame, cutoff: pd.Timestamp, end: pd.Timestamp,
+                          log=print) -> tuple[pd.DataFrame, pd.DataFrame | None, list[str]]:
+    """Onboarding: every uploading store's uploaded days join training, so the global model knows the
+    stores it serves (features built exactly as at serving time). Days inside the warehouses' holdout
+    window (cutoff, end] are left out so the headline test stays clean; days a store uploads later
+    are unseen by construction. Returns (rows, onboarding rows, onboarded stores)."""
     from forecaster.pipeline.store_learning import store_features, uploading_stores
     extra = []
     for store in uploading_stores(engine):
         f = store_features(engine, store, with_next_day=False)
-        f = demand.training_rows(f[f["date"] <= cutoff]) if len(f) else f
+        f = demand.training_rows(f[(f["date"] <= cutoff) | (f["date"] > end)]) if len(f) else f
         if len(f):
             extra.append(f)
     if not extra:
-        return rows, []
+        return rows, None, []
     ex = pd.concat(extra, ignore_index=True)
     for c in CATEGORICAL:
         rows[c], ex[c] = rows[c].astype(str), ex[c].astype(str)
-    log(f"onboarding: +{len(ex)} rows of uploaded history from {sorted(ex['store_id'].unique())} (up to {cutoff.date()})")
-    return pd.concat([rows, ex], ignore_index=True), sorted(ex["store_id"].unique())
+    log(f"onboarding: +{len(ex)} uploaded rows from {sorted(ex['store_id'].unique())} "
+        f"({ex['date'].min().date()} → {ex['date'].max().date()}, holdout window excluded)")
+    return rows, ex, sorted(ex["store_id"].unique())
 
 
 def plan_existing_stores(engine, cand, version: str, log=print) -> pd.DataFrame:
@@ -204,8 +207,8 @@ def main() -> None:
     rows = demand.training_rows(feat, excluded_days(engine))
     end = rows["date"].max()
     cutoff = end - pd.Timedelta(days=HOLDOUT_DAYS)
-    rows, onboarded = with_uploaded_history(engine, rows, cutoff, log)
-    cand = lifecycle.train_candidate(rows, cutoff, TRAIN_START)
+    rows, onboard, onboarded = with_uploaded_history(engine, rows, cutoff, end, log)
+    cand = lifecycle.train_candidate(rows, cutoff, TRAIN_START, extra_train=onboard)
     hold = rows[rows["date"] > cutoff].copy()
     hold["pred"] = cand.predict(hold)
     hold["p80"] = cand.predict_p80(hold, hold["pred"].to_numpy())

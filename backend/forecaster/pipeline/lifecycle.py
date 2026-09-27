@@ -76,8 +76,11 @@ def _produce(d: pd.DataFrame) -> pd.DataFrame:
 
 
 def train_candidate(rows: pd.DataFrame, cutoff: pd.Timestamp, start: pd.Timestamp,
-                    exclude: tuple[str, ...] = (), config: dict | None = None) -> Candidate:
+                    exclude: tuple[str, ...] = (), config: dict | None = None,
+                    extra_train: pd.DataFrame | None = None) -> Candidate:
     """rows: training_rows(feature table). Uses only data in [start, cutoff].
+    extra_train: onboarded rows from uploading stores, always trained on (never used for early
+    stopping), whatever their dates — a store's own calendar need not match the warehouses'.
 
     config switches (each measured before being turned on by default):
       censor_stockouts   drop availability < 0.9 days as training targets
@@ -91,6 +94,8 @@ def train_candidate(rows: pd.DataFrame, cutoff: pd.Timestamp, start: pd.Timestam
         snap = snap[~(snap["availability"] < 0.9)]
     es_start = cutoff - pd.Timedelta(days=ES_VALID_DAYS)
     tr, va = snap[snap["date"] <= es_start], snap[snap["date"] > es_start]
+    if extra_train is not None and len(extra_train):
+        tr, snap = pd.concat([tr, extra_train], ignore_index=True), pd.concat([snap, extra_train], ignore_index=True)
     wfn = demand.volatility_weights if cfg["volatility_weight"] else None
     booster, meta, es_booster, es_meta, es_fraction = _fit_refit(tr, va, snap, exclude, wfn, cfg["single_model"])
     if cfg["single_model"]:

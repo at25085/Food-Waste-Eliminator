@@ -60,7 +60,7 @@ def _ledger_filters(context: str, store: str | None = None, product: str | None 
 
 
 def _ledger_rows(context: str, store: str | None = None, product: str | None = None, limit: int | None = None,
-                 with_weather: bool = False, graded: bool | None = None) -> pd.DataFrame:
+                 with_weather: bool = False, graded: bool | None = None, offset: int = 0) -> pd.DataFrame:
     """Predictions joined with outcomes, newest first; the weather JSON only when asked for.
     graded=True: only forecasts whose sales are in; False: only those still waiting."""
     cols = [c for c in _P.c if with_weather or c.name != "weather_forecast"]
@@ -72,6 +72,8 @@ def _ledger_rows(context: str, store: str | None = None, product: str | None = N
          .where(*where).order_by(_P.c.forecast_date.desc(), _P.c.store_id, _P.c.product_id))
     if limit:
         q = q.limit(limit)
+    if offset:
+        q = q.offset(offset)
     with engine.connect() as conn:
         df = pd.read_sql(q, conn)
     df["forecast_date"] = pd.to_datetime(df["forecast_date"])
@@ -301,9 +303,10 @@ def metrics_timeseries(context: str = "replay", store: str | None = None):
 
 
 @app.get("/api/ledger")
-def ledger(context: str = "replay", store: str | None = None, product: str | None = None, limit: int = 200,
+def ledger(context: str = "replay", store: str | None = None, product: str | None = None,
+           limit: int = Query(default=200, ge=1, le=2000), offset: int = Query(default=0, ge=0),
            graded: bool | None = None):
-    df = _ledger_rows(context, store, product, limit=limit, with_weather=True, graded=graded)
+    df = _ledger_rows(context, store, product, limit=limit, with_weather=True, graded=graded, offset=offset)
     df["forecast_date"] = df["forecast_date"].dt.strftime("%Y-%m-%d")
     df["error"] = df["predicted_units"] - df["actual_units_sold"]
     return df.replace({np.nan: None}).to_dict("records")
@@ -784,12 +787,12 @@ def _csv(df: pd.DataFrame, filename: str) -> Response:
 @app.get("/api/stores/{store_id}/plan.csv")
 def plan_csv(store_id: str, waste_cost_ratio: float = Query(default=None, ge=0.05, le=2.0)):
     rec = recommendations(store_id, waste_cost_ratio=waste_cost_ratio, category=None)
-    cols = ["forecast_date", "store_id", "product_id", "name", "category", "p50", "p80", "on_hand",
+    cols = ["forecast_date", "store_id", "product_id", "name", "category", "p50", "on_hand",
             "expiring_tomorrow", "order_qty", "waste_risk", "surplus_units", "markdown", "schedule_text",
             "surplus_action", "donate_units", "donate_date", "clear_all_discount", "clear_all_money_vs_no_action",
             "clear_all_unsold_at_deepest", "lift_source", "model_version"]
     df = pd.DataFrame(rec["items"])
-    df = df[[c for c in cols if c in df.columns]].rename(columns={"p50": "forecast_units", "p80": "forecast_p80"})
+    df = df[[c for c in cols if c in df.columns]].rename(columns={"p50": "forecast_units"})
     return _csv(df, f"{store_id}_order_plan_{rec['forecast_date']}.csv")
 
 

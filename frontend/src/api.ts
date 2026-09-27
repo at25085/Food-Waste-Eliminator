@@ -1,11 +1,27 @@
 import { useCallback, useEffect, useState } from "react";
 
 /** Write token for a locked deployment: open the dashboard once with ?token=… and it is kept locally. */
+/** Save the store access code (the server's API_TOKEN) in this browser. */
+export function setAccessCode(code: string): void {
+  try {
+    localStorage.setItem("apiToken", code.trim());
+  } catch {
+    /* storage unavailable: the code lasts for this page only */
+    memoryCode = code.trim();
+  }
+}
+let memoryCode = "";
+
 function authHeaders(): Record<string, string> {
   try {
-    const q = new URLSearchParams(window.location.search).get("token");
-    if (q) localStorage.setItem("apiToken", q);
-    const t = localStorage.getItem("apiToken");
+    const url = new URL(window.location.href);
+    const q = url.searchParams.get("token");
+    if (q) {
+      localStorage.setItem("apiToken", q);
+      url.searchParams.delete("token"); // don't leave the code in the address bar or history
+      window.history.replaceState(null, "", url.toString());
+    }
+    const t = localStorage.getItem("apiToken") || memoryCode;
     return t ? { Authorization: `Bearer ${t}` } : {};
   } catch {
     return {};

@@ -34,7 +34,14 @@ from forecaster.pipeline.make_sample_uploads import simulate
 CHAIN = {"Atlanta": ("Brno_1", "Atlanta, GA"), "Augusta": ("Prague_1", "Augusta, GA"), "Macon": ("Budapest_1", "Macon, GA")}
 LOCAL_PER_USD = {"Brno_1": 23.0, "Prague_1": 23.0, "Budapest_1": 365.0}  # koruna / forint per dollar (2024)
 SOURCE_COUNTRY = {"Brno_1": "CZ", "Prague_1": "CZ", "Budapest_1": "HU"}  # the calendar the sales followed
-HISTORY_START, LIVE_START, LIVE_END = "2023-12-01", "2024-05-06", "2024-06-02"
+# Source dates (the real sales). The chain replays them 121 weeks later, so weekdays are unchanged
+# and the last replayed day is 2026-09-26: tomorrow's plan is for Sunday 2026-09-27.
+HISTORY_START, LIVE_START, LIVE_END = "2023-12-01", "2024-05-05", "2024-06-01"
+DATE_SHIFT = pd.Timedelta(weeks=121)
+
+
+def _shift(col: pd.Series) -> pd.Series:
+    return (pd.to_datetime(col) + DATE_SHIFT).dt.strftime("%Y-%m-%d")
 
 
 def sheets_for(source: str) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -51,7 +58,11 @@ def sheets_for(source: str) -> tuple[pd.DataFrame, pd.DataFrame]:
         d, b = simulate(g, life, str(pid))
         daily += d
         batches += b
-    return pd.DataFrame(daily), pd.DataFrame(batches)
+    daily, batches = pd.DataFrame(daily), pd.DataFrame(batches)
+    daily["date"] = _shift(daily["date"])
+    for c in ("received_date", "expiry_date"):
+        batches[c] = _shift(batches[c])
+    return daily, batches
 
 
 def main() -> None:
@@ -63,7 +74,7 @@ def main() -> None:
     engine = api.engine
     out = REPO_ROOT / "samples" / "georgia"
     out.mkdir(parents=True, exist_ok=True)
-    live_days = pd.date_range(LIVE_START, LIVE_END).strftime("%Y-%m-%d")
+    live_days = pd.date_range(pd.Timestamp(LIVE_START) + DATE_SHIFT, pd.Timestamp(LIVE_END) + DATE_SHIFT).strftime("%Y-%m-%d")
     phase = sys.argv[1] if len(sys.argv) > 1 else "all"
     for store_id, (source, place) in CHAIN.items():
         t0 = time.time()
@@ -79,14 +90,14 @@ def main() -> None:
                 continue
             conn.execute(insert(S.stores).values(
                 store_id=store_id, city=loc["city"], lat=loc["lat"], lon=loc["lon"], timezone=loc["timezone"],
-                country=SOURCE_COUNTRY[source], subdivision=None, traffic_connected=False, kind="demo",
-                label=f"Demo store: real grocery sales (Rohlik {source.replace('_', ' ')}) replayed in {loc['city']}; "
-                      "deliveries and waste simulated; dairy and eggs synthetic"))
+                country=loc["country"], subdivision=loc["subdivision"], traffic_connected=False, kind="demo",
+                label=f"Demo store: real grocery sales (Rohlik {source.replace('_', ' ')}, 2023-24) replayed in "
+                      f"{loc['city']} 121 weeks later; deliveries and waste simulated; dairy and eggs synthetic"))
         daily, batches = sheets_for(source)
         daily.to_csv(out / f"{store_id}_daily.csv", index=False)
         batches.to_csv(out / f"{store_id}_batches.csv", index=False)
 
-        history = daily[daily["date"] < LIVE_START]
+        history = daily[daily["date"] < live_days[0]]
         r = api._ingest_daily(store_id, history.to_csv(index=False).encode(), "history.csv", None)
         print(f"{store_id} ← {source}: history {r['accepted']} rows, next forecast {r.get('next_forecast_date')}", flush=True)
         if phase == "all":
