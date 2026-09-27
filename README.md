@@ -4,8 +4,7 @@
 
 Keeps fresh food out of the bin. Perishable-demand forecasting for grocers that **acts** on its
 predictions (order quantities net of stock on the shelf, waste-risk alerts, markdowns, donation of
-what a markdown won't clear) and **learns** whether they were right through a governed
-champion/challenger loop. HackGT 13 — main track: **A Marina's Mission (Social Good)**.
+what a markdown won't clear) and is self-learning. HackGT 13 track: **A Marina's Mission (Social Good)**.
 
 > The display name is one setting (`APP_DISPLAY_NAME`, default "Freshora"); the code package is `forecaster`.
 
