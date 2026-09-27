@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { qs, useApi } from "../api";
-import type { LiveWeather, MarkdownStep, PromotionExperiment, RecItem, Recommendations, Store, WasteRisk } from "../types";
-import { Pager, Panel, RiskBadge, StateBlock, Sticker, WeatherGlyph } from "../components/ui";
+import type { LiveWeather, MarkdownStep, RecItem, Recommendations, Store, WasteRisk } from "../types";
+import { Pager, Panel, RiskBadge, StateBlock, WeatherGlyph } from "../components/ui";
 import StorePicker from "../components/StorePicker";
 import { categoryLabel } from "../chartTheme";
-import { day, fahrenheit, inches, int, isNum, mph, num, shortDay, spct, weatherText } from "../format";
+import { day, fahrenheit, inches, int, isNum, mph, num, shortDay, weatherText } from "../format";
 
 const RISK_ORDER: Record<WasteRisk, number> = { high: 0, watch: 1, low: 2 };
 type SortKey = "risk" | "name" | "category" | "p50" | "p80" | "order_qty" | "on_hand" | "expiring_tomorrow" | "markdown" | "plan";
@@ -31,7 +31,6 @@ export default function Today(props: { stores: Store[]; store: string | null; se
 
   const recs = useApi<Recommendations>(store ? `/api/stores/${store}/recommendations${qs({ waste_cost_ratio: wcrQuery.toFixed(2) })}` : null);
   const live = useApi<LiveWeather>(store ? `/api/stores/${store}/weather/live` : null);
-  const promos = useApi<PromotionExperiment[]>(store ? `/api/promotions${qs({ store })}` : null);
 
   const data = recs.data && recs.data.store_id === store ? recs.data : undefined;
 
@@ -283,8 +282,8 @@ export default function Today(props: { stores: Store[]; store: string | null; se
               <span className="kpi__l">units expiring tomorrow</span>
             </div>
             <div className="kpi">
-              <span className="kpi__v kpi__v--risk">{totals.high}</span>
-              <span className="kpi__l">high waste risk</span>
+              <span className="kpi__v kpi__v--risk">{totals.high + totals.watch}</span>
+              <span className="kpi__l">products to discount or donate</span>
             </div>
             <div className="kpi">
               <span className="kpi__v">{totals.markdowns}</span>
@@ -420,73 +419,9 @@ export default function Today(props: { stores: Store[]; store: string | null; se
         )}
       </Panel>
 
-      <PromotionPanel promos={promos} items={data?.items ?? []} />
     </div>
   );
 }
-
-function PromotionPanel({ promos, items }: { promos: ReturnType<typeof useApi<PromotionExperiment[]>>; items: RecItem[] }) {
-  const names = useMemo(() => new Map(items.map((i) => [i.product_id, i])), [items]);
-  const list = [...(promos.data ?? [])].sort((a, b) => b.start_time.localeCompare(a.start_time));
-  return (
-    <Panel
-      flush
-      title="Promotion experiments"
-      sub="Every discount day in the store's sheets is recorded with the forecast without the discount and what actually sold. After about 15 per category, discount plans use this store's measured response."
-    >
-      {promos.error || promos.loading || !list.length ? (
-        <StateBlock
-          compact
-          loading={promos.loading && !promos.data}
-          error={promos.error}
-          onRetry={promos.reload}
-          empty={!list.length}
-          emptyText="No discount days in this store's sheets yet."
-        />
-      ) : (
-        <div className="tablewrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th className="num">Discount</th>
-                <th>Window</th>
-                <th className="num">Stock before</th>
-                <th className="num">Forecast without</th>
-                <th className="num">Actual sales</th>
-                <th className="num">Observed lift</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((p) => {
-                const it = names.get(p.product_id);
-                return (
-                  <tr key={p.experiment_id}>
-                    <td className="item">
-                      <span className="item__name">{it?.name ?? `Product ${p.product_id}`}</span>
-                      <span className="item__id">#{p.product_id}</span>
-                    </td>
-                    <td className="num">
-                      <Sticker depth={p.discount} />
-                    </td>
-                    <td>
-                      {day(p.start_time.slice(0, 10), { year: false })}, {p.start_time.slice(11, 16)}–{p.end_time.slice(11, 16)}
-                    </td>
-                    <td className="num">{num(p.inventory_before, 0)}</td>
-                    <td className="num">{num(p.forecast_without_promotion, 1)}</td>
-                    <td className="num">{isNum(p.actual_sales) ? num(p.actual_sales, 1) : <span className="pending">awaiting outcome</span>}</td>
-                    <td className="num">{isNum(p.observed_lift) ? spct(p.observed_lift, 0) : <span className="pending">measuring</span>}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Panel>
-  );
-}
-
 
 interface BriefingResp {
   text: string;
